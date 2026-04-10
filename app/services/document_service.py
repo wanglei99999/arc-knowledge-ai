@@ -14,9 +14,10 @@ from app.workflows.ingestion_workflow import IngestionWorkflow
 class IngestRequest:
     tenant_id: str
     space_id: str
-    file_path: str       # MinIO 上传后的路径
+    file_path: str       # MinIO object key
     mime_type: str
     original_filename: str
+    document_id: str | None = None  # API 层上传 MinIO 后传入，None 时自动生成
     # 租户配置（由控制面传入，或从 Nacos 查询）
     ingestion_strategy: str = "standard"
     embedding_provider: str = "openai_embedding"
@@ -46,7 +47,7 @@ class DocumentService:
         return await Client.connect(settings.temporal_host)
 
     async def ingest(self, req: IngestRequest) -> IngestResult:
-        document_id = str(uuid.uuid4())
+        document_id = req.document_id or str(uuid.uuid4())
         task_id = str(uuid.uuid4())
 
         inp = IngestionInput(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.infrastructure.minio.client import build_object_key, upload_file
 from app.services.document_service import DocumentService, IngestRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -44,15 +45,20 @@ async def upload_document(
 
     mime_type = file.content_type or "application/octet-stream"
 
-    # Phase 0：直接用原始文件名作为路径占位（Phase 1 接入 MinIO 后替换）
-    file_path = f"/{x_tenant_id}/{space_id}/{file.filename}"
+    # Phase 1：上传到 MinIO，用 document_id 作为 object key 避免文件名冲突
+    import uuid
+    document_id = str(uuid.uuid4())
+    data = await file.read()
+    object_key = build_object_key(x_tenant_id, space_id, document_id, file.filename)
+    await upload_file(data, object_key, content_type=mime_type)
 
     req = IngestRequest(
         tenant_id=x_tenant_id,
         space_id=space_id,
-        file_path=file_path,
+        file_path=object_key,
         mime_type=mime_type,
         original_filename=file.filename,
+        document_id=document_id,
     )
 
     result = await _service.ingest(req)

@@ -103,17 +103,57 @@ python scripts/start_worker.py
 
 ---
 
-## Phase 1：完整 Ingestion ⬜
+## Phase 1：完整 Ingestion ✅
 
 **目标**：接入真实存储，支持 PDF / Word / Excel 多格式。
 
-- [ ] `infrastructure/minio/client.py` — 文件上传到 MinIO
-- [ ] `infrastructure/milvus/client.py` — 向量写入 Milvus
-- [ ] `pipeline/stages/embedding/milvus_index_stage.py` — 向量写 Milvus Stage
-- [ ] `providers/parser/paddleocr_provider.py` — 扫描件 OCR
-- [ ] `pipeline/strategies/ingestion/ocr_strategy.py` — OCR 专用策略
-- [ ] 数据库迁移脚本 `scripts/migrate.py`
-- [ ] `docker-compose.yml` — 本地依赖一键启动
+- [x] `infrastructure/minio/client.py` — 文件上传/下载，boto3 + run_in_executor
+- [x] `infrastructure/milvus/client.py` — 向量写入/检索，tenant_id 作 Partition Key
+- [x] `pipeline/stages/embedding/milvus_index_stage.py` — 向量写 Milvus Stage
+- [x] `providers/parser/paddleocr_provider.py` — 扫描件 OCR，置信度过滤
+- [x] `pipeline/strategies/ingestion/ocr_strategy.py` — OCR 专用策略
+- [x] `scripts/migrate.py` — PostgreSQL 建表（幂等）
+- [x] `docker-compose.yml` — PostgreSQL / MinIO / Milvus / Redis / Temporal 一键启动
+
+**重构**：
+- [x] `StandardIngestionStrategy` — 加入 `MilvusIndexStage`（embed → milvus）
+- [x] `embed_and_index_activity` — 走 `Pipeline.start(embedder).then(milvus_indexer)`
+- [x] `api/routers/document.py` — 真实上传到 MinIO，传 object_key 给 Workflow
+- [x] `services/document_service.py` — 支持外部传入 `document_id`
+- [x] `main.py` — 注册 `milvus_index_stage` / `paddleocr_parser` / `ocr` strategy
+
+### 调用链路（Phase 1）
+
+```
+POST /documents/upload
+  → 读取文件字节
+  → MinIO upload_file()                   ← 新增
+  → DocumentService.ingest()
+  → Temporal: IngestionWorkflow
+      ├── parse_activity  →  ParserStage  →  UnstructuredParserProvider
+      ├── chunk_activity  →  TokenChunkerStage
+      └── embed_and_index_activity
+              →  EmbedStage   →  OpenAIEmbeddingProvider
+              →  MilvusIndexStage  →  Milvus  ← 新增
+              →  ChunkRepository  →  PostgreSQL
+```
+
+### 启动方式
+
+```bash
+# 1. 启动所有依赖
+docker-compose up -d
+
+# 2. 建表
+python scripts/migrate.py
+
+# 3. 启动服务
+cp .env.example .env   # 填入 OPENAI_API_KEY
+uvicorn app.main:app --reload
+
+# 4. 启动 Temporal Worker
+python scripts/start_worker.py
+```
 
 ---
 
