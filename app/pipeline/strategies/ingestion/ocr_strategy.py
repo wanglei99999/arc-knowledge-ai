@@ -10,23 +10,26 @@ from app.pipeline.stages.parsing.parser_stage import ParserStage
 from app.pipeline.strategies.base_strategy import BaseStrategy
 
 
-@registry.strategy("standard")
-class StandardIngestionStrategy(BaseStrategy):
+@registry.strategy("ocr")
+class OCRIngestionStrategy(BaseStrategy):
     """
-    标准文档入库策略。
+    扫描件入库策略，使用 PaddleOCR 解析。
 
-    Pipeline：ParserStage → TokenChunkerStage → EmbedStage → MilvusIndexStage
+    Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage → MilvusIndexStage
 
-    Phase 0：无 Hook（hooks = []）
-    Phase 3 开启后添加：[TenantGuard, ObservabilityHook, QuotaGuard, IdempotencyGuard]
+    与 StandardIngestionStrategy 的区别：
+    - parser_provider 强制使用 paddleocr_parser
+    - chunk_size 默认更小（扫描件 OCR 结果噪声多，短段更准确）
     """
 
-    strategy_id = "standard"
+    strategy_id = "ocr"
     hooks = []  # Phase 3 再填充
 
     def build_pipeline(self, doc_type: str, config: TenantConfig) -> Pipeline:
+        # 强制走 OCR provider，覆盖租户配置中的 parser_provider
+        parser = ParserStage(provider_id="paddleocr_parser")
         return (
-            Pipeline.start(ParserStage())
+            Pipeline.start(parser)
             .then(TokenChunkerStage())
             .then(EmbedStage())
             .then(MilvusIndexStage())

@@ -7,6 +7,7 @@ from temporalio import activity
 from app.domain.document import DocumentChunk, DocumentStatus, RawFile
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
+from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
 from app.providers.base import ParsedDocument
 
@@ -105,7 +106,8 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
 @activity.defn(name="embed_and_index")
 async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict]) -> int:
     """
-    Activity 3：向量化 + 写入 PostgreSQL
+    Activity 3：向量化 + 写入 PostgreSQL + 写入 Milvus。
+    走 Strategy → Pipeline，EmbedStage → MilvusIndexStage 顺序执行。
     返回成功写入的 chunk 数量。
     """
     ctx = _make_context(inp)
@@ -123,8 +125,13 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         for d in chunk_dicts
     ]
 
-    embedder_stage = registry.get_stage("embedder")
-    embedded_chunks: list[DocumentChunk] = await embedder_stage.execute(ctx, chunks)
+    # EmbedStage → MilvusIndexStage
+    # Activity 3 只负责向量化和写库，不重跑解析/切片
+    embed_pipeline = (
+        Pipeline.start(registry.get_stage("embedder"))
+        .then(registry.get_stage("milvus_indexer"))
+    )
+    embedded_chunks: list[DocumentChunk] = await embed_pipeline.run(ctx, chunks)
 
     repo = ChunkRepository()
     await repo.save_chunks(embedded_chunks)
