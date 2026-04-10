@@ -13,6 +13,16 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+#文本切割算法如下：
+#文本 → 按双换行拆成段落
+#        ↓
+#        每个段落累积 token 数
+#        ↓
+#        超过 chunk_size？→ 保存当前 chunk
+#                         → 取末尾若干段落作为 overlap（重叠）
+#                         → 继续累积
+#        ↓
+#       最后一批段落 → 最后一个 chunk
 def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     """
     按段落滑窗切分文本。

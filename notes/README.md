@@ -21,6 +21,7 @@
 | [09](./09-workflow.md) | Temporal 工作流 | 长流程怎么保证不丢失？ | `workflows/` |
 | [10](./10-service-api.md) | Service + API 层 | 请求从 HTTP 到业务逻辑的路径 | `services/` + `api/` |
 | [11](./11-full-flow.md) | 完整链路追踪 | 一个文件上传后发生了什么？ | 全部 |
+| [12](./python_basic_knowledge/01-python-basics.md) | Python 语法补充 | 看懂项目里常见的抽象类、泛型与 `with` 语法 | `stage.py` + `workflow.py` |
 
 ---
 

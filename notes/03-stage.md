@@ -216,3 +216,4 @@ class ParserStage(BaseStage):
 
 - 了解 Stage 怎么被串联起来 → [04 Pipeline](./04-pipeline.md)
 - 了解 Provider 的具体实现 → [07 Provider](./07-provider.md)
+- 如果是卡在 `ABC` / `Generic` / `TypeVar` / `ClassVar` 这些 Python 语法上 → [12 Python 语法补充](./12-python-basics.md)
