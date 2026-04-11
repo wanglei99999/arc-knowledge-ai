@@ -5,6 +5,7 @@ from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
 from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
 from app.pipeline.stages.embedding.embed_stage import EmbedStage
+from app.pipeline.stages.embedding.es_index_stage import ESIndexStage
 from app.pipeline.stages.embedding.milvus_index_stage import MilvusIndexStage
 from app.pipeline.stages.parsing.parser_stage import ParserStage
 from app.pipeline.strategies.base_strategy import BaseStrategy
@@ -15,7 +16,7 @@ class StandardIngestionStrategy(BaseStrategy):
     """
     标准文档入库策略。
 
-    Pipeline：ParserStage → TokenChunkerStage → EmbedStage → MilvusIndexStage
+    Pipeline：ParserStage → TokenChunkerStage → EmbedStage → MilvusIndexStage → ESIndexStage
 
     Phase 0：无 Hook（hooks = []）
     Phase 3 开启后添加：[TenantGuard, ObservabilityHook, QuotaGuard, IdempotencyGuard]
@@ -30,4 +31,5 @@ class StandardIngestionStrategy(BaseStrategy):
             .then(TokenChunkerStage())
             .then(EmbedStage())
             .then(MilvusIndexStage())
+            .then(ESIndexStage())
         )

@@ -157,18 +157,60 @@ python scripts/start_worker.py
 
 ---
 
-## Phase 2：RAG 检索生成 ⬜
+## Phase 2：RAG 检索生成 ✅
 
 **目标**：向量检索 + LLM 流式问答。
 
-- [ ] `infrastructure/milvus/client.py` — ANN 检索
-- [ ] `infrastructure/elasticsearch/client.py` — BM25 检索
-- [ ] `pipeline/stages/retrieval/` — 查询改写 / 向量检索 / 关键词检索 / RRF 融合 / Rerank
-- [ ] `pipeline/strategies/retrieval/hybrid_strategy.py`
-- [ ] `services/retrieval_service.py` + `api/routers/search.py`
-- [ ] `providers/llm/openai_llm.py` + `providers/llm/ollama_llm.py`
-- [ ] `workflows/rag_orchestrator.py` — RAG 生成编排
-- [ ] `services/chat_service.py` + `api/routers/chat.py` (SSE)
+- [x] `infrastructure/milvus/client.py` — ANN 检索（Phase 1 已实现 `search_vectors()`）
+- [x] `infrastructure/elasticsearch/client.py` — BM25 检索（`index_chunks` + `bm25_search` + `delete_by_document`）
+- [x] `pipeline/stages/retrieval/query_rewrite_stage.py` — 查询改写（pass-through，Phase 3 接 LLM）
+- [x] `pipeline/stages/retrieval/vector_search_stage.py` — Milvus ANN 检索
+- [x] `pipeline/stages/retrieval/keyword_search_stage.py` — ES BM25 检索
+- [x] `pipeline/stages/retrieval/rrf_fusion_stage.py` — Reciprocal Rank Fusion 融合
+- [x] `pipeline/stages/retrieval/rerank_stage.py` — Rerank（pass-through，Phase 3 接 RerankProvider）
+- [x] `pipeline/stages/embedding/es_index_stage.py` — 入库时写 ES
+- [x] `pipeline/strategies/retrieval/hybrid_strategy.py` — 混合检索策略
+- [x] `providers/llm/openai_llm.py` — OpenAI LLM（流式 + 非流式）
+- [x] `providers/llm/ollama_llm.py` — Ollama 本地 LLM
+- [x] `workflows/rag_orchestrator.py` — RAG 全链路协调器
+- [x] `services/retrieval_service.py` — 检索服务
+- [x] `services/chat_service.py` — 问答服务
+- [x] `api/routers/search.py` — `GET /search`
+- [x] `api/routers/chat.py` — `POST /chat`（SSE 流式）
+
+**重构**：
+- [x] `StandardIngestionStrategy` — 加入 `ESIndexStage`（同时写 Milvus + ES）
+- [x] `main.py` — 注册 Retrieval Stage / LLM Provider / Hybrid Strategy
+
+### 调用链路（Phase 2）
+
+```
+GET /search?q=...
+  → RetrievalService.search()
+  → RAGOrchestrator.retrieve()
+      → HybridRetrievalStrategy.build_pipeline()
+      → QueryRewriteStage（pass-through）
+      → VectorSearchStage  → Milvus ANN
+      → KeywordSearchStage → Elasticsearch BM25
+      → RRFFusionStage     → 融合排序
+      → RerankStage        → 精排（pass-through）
+  → ChunkRepository.get_chunks_by_ids() → PostgreSQL
+  → 返回 { hits, chunks }
+
+POST /chat
+  → ChatService.stream_chat()
+  → RAGOrchestrator.retrieve()   ← 同上
+  → RAGOrchestrator.stream_generate()
+      → LLMProvider.stream_generate()  → OpenAI / Ollama
+  → StreamingResponse (SSE)
+```
+
+### 新增接口
+
+| 接口 | 说明 |
+|------|------|
+| `GET /search?q=...&space_id=...&top_k=10` | 混合检索，返回 chunk 列表 |
+| `POST /chat` | RAG 问答，SSE 流式输出 |
 
 ---
 

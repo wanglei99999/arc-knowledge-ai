@@ -32,6 +32,13 @@
 | [13](./13-infrastructure.md) | 基础设施层 | MinIO / Milvus / PG 各存什么？run_in_executor 怎么用？ | `infrastructure/` |
 | [14](./14-full-flow-v2.md) | 完整链路追踪 v2 | Phase 1 加入 MinIO 上传和 Milvus 写入后链路怎么变？ | 全部 |
 
+### Phase 2（v3.0）— RAG 检索生成
+
+| 编号 | 文档 | 核心问题 | 对应代码 |
+|------|------|---------|---------|
+| [15](./15-retrieval-pipeline.md) | Retrieval Pipeline | SearchContext 是什么？RRF 怎么算？为什么顺序 Pipeline 能做混合检索？ | `pipeline/stages/retrieval/` |
+| [16](./16-full-flow-v3.md) | 完整链路追踪 v3 | 一次搜索和一次问答各经历了什么？SSE 怎么工作？ | 全部 |
+
 ---
 
 ## 快速参考

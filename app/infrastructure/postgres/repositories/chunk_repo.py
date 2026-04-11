@@ -73,6 +73,28 @@ class ChunkRepository:
                 "tenant_id": tenant_id,
             })
 
+    async def get_chunks_by_ids(
+        self,
+        chunk_ids: list[str],
+        tenant_id: str,
+    ) -> list[dict]:
+        """按 chunk_id 列表批量查询，保留顺序（ORDER BY chunk_index）。"""
+        if not chunk_ids:
+            return []
+        sql = text("""
+            SELECT chunk_id, content, document_id, chunk_index, token_count, metadata
+            FROM document_chunk
+            WHERE chunk_id  = ANY(:chunk_ids)
+              AND tenant_id = :tenant_id
+            ORDER BY chunk_index
+        """)
+        async with get_session() as session:
+            result = await session.execute(sql, {
+                "chunk_ids": chunk_ids,
+                "tenant_id": tenant_id,
+            })
+            return [dict(row._mapping) for row in result]
+
     async def get_chunks_by_document(
         self,
         document_id: str,

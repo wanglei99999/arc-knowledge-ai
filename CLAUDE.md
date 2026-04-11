@@ -69,6 +69,26 @@ Stage 构造函数接受可选的 `provider` 参数用于测试注入；不传�
 
 `StandardIngestionStrategy.hooks = []`，Phase 3 会填入 `[TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]`。Hook 通过 `priority` 整数控制执行顺序（数值越小越先执行）。现阶段不需要修改 Hook 相关代码。
 
+### RAG 检索架构（Phase 2）
+
+RAG 走**同步 HTTP 链路**，不使用 Temporal（原因见 ADR-012）。
+
+**数据载体**：`SearchContext`（`domain/retrieval.py`）贯穿整条 Retrieval Pipeline，类比 Ingestion 里的 `ProcessingContext`。
+
+**Retrieval Pipeline**（混合检索）：
+```
+SearchContext → QueryRewriteStage → VectorSearchStage → KeywordSearchStage
+             → RRFFusionStage → RerankStage → list[SearchHit]
+```
+
+**入口**：`RAGOrchestrator`（`workflows/rag_orchestrator.py`）
+- `retrieve()` — 运行 Retrieval Pipeline + 从 PG 拉取 chunk 文本
+- `stream_generate()` — 调用 LLMProvider，yield token
+
+**LLMProvider 选择**：从 `ctx.config.llm_provider` 取（默认 `openai_llm`，可换 `ollama_llm`）。
+
+**SSE 流式输出**：`POST /chat` 返回 `StreamingResponse(media_type="text/event-stream")`，格式为 `data: {"delta": "..."}` 逐 token 推送，以 `data: [DONE]` 结束。
+
 ## 测试
 
 单元测试使用 `conftest.py` 中的 `fake_ctx` fixture，不启动任何外部依赖。需要替换真实 Provider 时，继承对应的抽象类实现 Fake 版本：

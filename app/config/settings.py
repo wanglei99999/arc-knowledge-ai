@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     openai_llm_model: str = "gpt-4o-mini"
 
+    # ── Ollama（本地 LLM）────────────────────────────────────────────────────
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_llm_model: str = "llama3.2"
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"
