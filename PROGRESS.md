@@ -311,7 +311,7 @@ stream_generate() 调用：
 | `DELETE /admin/models/switch` | 重置为 settings 默认 |
 | `GET /admin/models/current` | 查询当前生效模型 |
 
-### ⚠️ 已知设计局限（Phase 6 待修复）
+### ⚠️ 已知设计局限（MVP-B 待修复）
 
 | 问题 | 位置 | 影响 |
 |------|------|------|
@@ -321,107 +321,214 @@ stream_generate() 调用：
 
 ---
 
-## Phase 6：多租户模型路由 📋 设计中
+## Phase 6：文档删除 📋 设计中
 
-**基于 Phase 5（v6.0）改进，版本目标 v7.0**
+**版本目标 v7.0**
 
-**目标**：修复全局模型状态与硬编码 TenantConfig 两个架构局限，实现真正的多租户模型路由。计量与计费能力见 Phase 7。
-
-### 三层模型解析优先级
-
-```
-POST /chat { "model": "gpt-4o" }     ← ③ 请求级覆盖，本次生效
-        ↓ 未指定时
-TenantConfig.default_llm_model       ← ② 租户默认，持久化在 PostgreSQL
-        ↓ 未配置时
-settings.openai_llm_model            ← ① 系统默认，配置文件
-```
-
-### 新增 DB 表
-
-| 表 | 核心字段 | 用途 |
-|----|---------|------|
-| `tenant_configs` | `tenant_id`, `default_llm_provider`, `default_llm_model`, `allowed_models`(JSONB), `updated_at` | 持久化每个租户的模型偏好与权限白名单 |
+**目标**：补全文档生命周期，支持从四个存储中联动删除，解决数据只增不减的问题。
 
 ### 新增文件
 
 | 文件 | 说明 |
 |------|------|
-| `infrastructure/postgres/repositories/tenant_config_repo.py` | 租户配置 CRUD，`load(tenant_id)` 替代硬编码 `TenantConfig()` |
+| `workflows/ingestion_activities.py` | 新增 `delete_activity`，Temporal 保证四处清理原子性 |
+| `services/document_service.py` | 新增 `delete()` 方法，协调四处存储清理 |
 
 ### 修改文件
 
-| 文件 | 改动内容 | 对应 Phase 5 局限 |
-|------|---------|-----------------|
-| `pipeline/core/context.py` | `TenantConfig` 新增 `llm_model: str \| None`、`allowed_models: list[str]` 字段 | — |
-| `providers/llm/model_hub.py` | 实现三层解析逻辑；校验请求 model 是否在 `allowed_models` 白名单内 | 替换全局 model_state |
-| `providers/llm/openai_llm.py` | `generate/stream_generate` 接受 `model` 参数，不再依赖 `__init__` 固化的 `self._model` | OpenAI 无热切换 |
-| `providers/llm/ollama_llm.py` | 同上，删除 `get_current_model()` 调用 | 全局可变状态 |
-| `workflows/rag_orchestrator.py` | 改用 `TenantConfigRepository.load(tenant_id)` 加载真实配置，透传 `model` 参数 | 硬编码默认值 |
-| `api/routers/chat.py` | `ChatRequestBody` 新增可选 `model: str \| None` 字段 | 支持请求级覆盖 |
-| `api/routers/admin.py` | 替换为租户配置管理接口 | 全局 switch 不支持多租户 |
-| `scripts/migrate.py` | 新增 `tenant_configs` 建表 | — |
-
-### 删除文件
-
-| 文件 | 原因 |
+| 文件 | 改动 |
 |------|------|
-| `providers/llm/model_state.py` | 全局可变状态反模式，由 `TenantConfigRepository` + `TenantConfig.llm_model` 替代 |
+| `api/routers/document.py` | 新增 `DELETE /documents/{id}` 接口 |
 
-### API 变更
+### 清理链路
 
-| 旧接口（v6.0，废弃） | 新接口（v7.0） | 说明 |
-|---|---|---|
-| `POST /admin/models/switch` | `PUT /admin/tenants/{tenant_id}/config` | 全局改为租户级 |
-| `DELETE /admin/models/switch` | （同上，`default_llm_model: null`） | 重置租户模型偏好 |
-| `GET /admin/models/current` | `GET /admin/tenants/{tenant_id}/config` | 查询租户完整配置 |
+```
+DELETE /documents/{id}
+  → DocumentService.delete()
+  → Temporal DeleteActivity
+      ├── MinIO: 删除原始文件
+      ├── Milvus: 按 document_id 删除向量
+      ├── Elasticsearch: 按 document_id 删除全文索引
+      └── PostgreSQL: 更新 document 状态 + 删除 chunks
+```
 
 ---
 
-## Phase 7：模型用量追踪 + 费用配额 📋 设计中
+## Phase 7：会话持久化 📋 设计中
 
-**依赖 Phase 6（v7.0），版本目标 v8.0**
+**版本目标 v8.0**
 
-**目标**：在 Phase 6 确定"用了哪个模型"之后，进一步记录"用了多少 token、花了多少钱"，将配额体系从粗粒度的"调用次数"升级为精细的"费用限额"。
-
-### 两个系统的职责边界
-
-| 系统 | Phase | 回答的问题 |
-|------|-------|----------|
-| 模型路由 | Phase 6 | 用哪个模型？租户是否有权限？ |
-| 用量计量 | Phase 7 | 用了多少 token？花了多少钱？配额是否超限？ |
+**目标**：服务端存储对话历史，支持真正的多轮对话管理，不再依赖调用方每次传入 history。
 
 ### 新增 DB 表
 
 | 表 | 核心字段 | 用途 |
 |----|---------|------|
-| `model_configs` | `model_id`, `provider_id`, `display_name`, `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `is_available` | 模型定价目录 |
-| `usage_records` | `id`, `tenant_id`, `model_id`, `input_tokens`, `output_tokens`, `cost_usd`, `created_at` | 每次 LLM 调用的用量流水 |
+| `sessions` | `session_id`, `tenant_id`, `space_id`, `title`, `created_at` | 会话元数据 |
+| `messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 每条消息记录 |
 
-### QuotaSnapshot 升级
+### 新增文件
 
-```
-# 当前（Phase 0~6）：计次
-max_api_calls_per_day   → 最多调用 100 次
-used_api_calls_today    → 今天用了 50 次
-
-# Phase 7：计费（兼容旧计次，两套并存）
-max_spend_per_day       → 今天最多花 $5.00
-used_spend_today        → 今天已花 $2.30
-```
-
-### 核心改动
-
-| 文件 | 改动内容 |
-|------|---------|
-| `pipeline/hooks/quota_guard.py` | PRE_PIPELINE 新增费用预估校验：基于请求估算 token 数 × 单价 < 剩余配额 |
-| `pipeline/hooks/observability_hook.py` | POST_PIPELINE 新增用量记录：解析 LLM 返回的 `usage`（input/output tokens），计算实际费用，写 `usage_records` |
-| `pipeline/core/context.py` | `QuotaSnapshot` 新增 `max_spend_per_day`、`used_spend_today` 字段 |
-| `scripts/migrate.py` | 新增 `model_configs` + `usage_records` 建表 |
-
-### 新增接口
-
-| 接口 | 说明 |
+| 文件 | 说明 |
 |------|------|
-| `GET /admin/tenants/{tenant_id}/usage` | 查询租户用量汇总（按天/按模型分组） |
-| `GET /admin/models` | 查询可用模型列表及定价 |
+| `infrastructure/postgres/repositories/session_repo.py` | 会话 + 消息 CRUD |
+| `services/session_service.py` | 会话管理业务逻辑 |
+| `api/routers/session.py` | `POST /sessions`、`GET /sessions/{id}/messages`、`DELETE /sessions/{id}` |
+
+### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`，自动持久化每轮消息 |
+| `services/chat_service.py` | 有 `session_id` 时从 DB 加载 history，无时沿用传入值 |
+| `scripts/migrate.py` | 新增 `sessions` + `messages` 建表 |
+
+---
+
+## Phase 8：检索质量提升 📋 设计中
+
+**版本目标 v9.0**
+
+**目标**：实现两个长期 pass-through 的 Stage，真正提升 RAG 召回率与精度。
+
+### QueryRewriteStage 真实实现
+
+**当前**：直接透传原始查询。
+**改为**：调用 LLM 生成 3 个语义变体查询，并行检索后合并，同时做意图识别过滤无关请求。
+
+| 文件 | 改动 |
+|------|------|
+| `pipeline/stages/retrieval/query_rewrite_stage.py` | 接入 LLM，实现多 Query 扩展 + 意图识别 |
+
+### RerankStage 真实实现
+
+**当前**：直接透传 RRF 结果。
+**改为**：接入 BGE-Reranker（本地免费）或 Cohere Rerank，对 Top-20 精排后返回 Top-K。
+
+| 文件 | 改动 |
+|------|------|
+| `providers/base.py` | 新增 `RerankProvider` 抽象接口 |
+| `providers/rerank/bge_rerank.py` | BGE-Reranker 实现 |
+| `pipeline/stages/retrieval/rerank_stage.py` | 调用 RerankProvider 替换 pass-through |
+
+---
+
+## Phase 9：测试补全 📋 设计中
+
+**版本目标 v10.0**
+
+**目标**：补全 Phase 1–5 的零测试状态，覆盖核心业务路径。
+
+| 模块 | 测试重点 |
+|------|---------|
+| Hook 系统 | TenantGuard / QuotaGuard 校验逻辑 |
+| ResilientLLMProvider | 重试次数、fallback 触发时机 |
+| RAGOrchestrator | 检索流程、Prompt 构建 |
+| 文档删除 | 四处存储联动清理 |
+| 会话持久化 | history 加载与写入 |
+| QueryRewrite / Rerank | Stage 输入输出契约 |
+
+---
+
+## Phase 10：多租户模型路由重构 📋 设计中
+
+**版本目标 v11.0**
+
+**目标**：修复 Phase 5 全局 model_state 局限，实现三层模型解析。
+
+> 📌 此 Phase 对应原"Phase 6 多租户模型路由"完整设计内容，详见 Phase 5 末尾的⚠️已知局限说明。
+
+### 三层解析优先级
+
+```
+请求级 model > TenantConfig.default_llm_model > settings.openai_llm_model
+```
+
+### 新增 DB 表
+
+| 表 | 核心字段 |
+|----|---------|
+| `tenant_configs` | `tenant_id`, `default_llm_provider`, `default_llm_model`, `allowed_models`(JSONB) |
+
+### 关键改动
+
+- `providers/llm/model_state.py` — **删除**，全局状态移除
+- `providers/llm/model_hub.py` — 升级为三层解析器 + allowed_models 校验
+- `providers/llm/openai_llm.py` / `ollama_llm.py` — model 改为按调用传入
+- `api/routers/admin.py` — 全局 switch 接口替换为租户级配置管理
+
+---
+
+## Phase 11：限流 + 语义缓存 📋 设计中
+
+**版本目标 v12.0**
+
+**目标**：防滥用 + 降低重复 LLM 调用成本。
+
+### Rate Limiting
+
+- `api/middleware/rate_limit.py` — 基于 Redis 滑动窗口，按 `tenant_id` 限流（默认 60次/分钟）
+
+### 语义缓存
+
+- 问题向量化 → 查 Redis（余弦相似度 > 0.95 命中）→ 直接返回，跳过检索 + LLM
+- `pipeline/hooks/` 新增 `semantic_cache_hook.py`，PRE_PIPELINE 查缓存，POST_PIPELINE 写缓存
+
+---
+
+## Phase 12：用量追踪 📋 设计中
+
+**版本目标 v13.0**
+
+**目标**：记录每次 LLM 调用的 token 消耗与费用，为配额管理和成本分析提供数据基础。
+
+> 📌 此 Phase 对应原"Phase 7 模型用量追踪"完整设计内容。
+
+### 新增 DB 表
+
+| 表 | 核心字段 |
+|----|---------|
+| `model_configs` | `model_id`, `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window` |
+| `usage_records` | `tenant_id`, `model_id`, `input_tokens`, `output_tokens`, `cost_usd`, `created_at` |
+
+### 关键改动
+
+- `pipeline/hooks/observability_hook.py` — POST_PIPELINE 解析 LLM usage，写 `usage_records`
+- `pipeline/core/context.py` — `QuotaSnapshot` 新增 `max_spend_per_day`、`used_spend_today`
+- 新增 `GET /admin/tenants/{id}/usage` 和 `GET /admin/models` 接口
+
+---
+
+## Phase 13：可观测性完善 + Admin UI 📋 设计中
+
+**版本目标 v14.0**
+
+**目标**：让系统具备生产运营能力。
+
+### 可观测性
+
+- Grafana 看板：Stage 耗时 / Pipeline 成功率 / LLM 延迟 / 用量趋势
+- Prometheus AlertRule：延迟 P95 > 3s / 错误率 > 5% / LLM 连续失败
+
+### 最小 Admin UI
+
+- 文档列表管理（上传 / 删除 / 状态）
+- 租户模型配置
+- 用量查看
+
+---
+
+## Phase 14+：Java 控制面
+
+**条件**：Python MVP 稳定、有真实多用户接入需求时启动。
+
+```
+arc-gateway   → 统一入口、JWT 验证、限流
+arc-auth      → OAuth2 / SSO / MFA
+arc-tenant    → 租户配置、配额、计费（接管 Python 临时替代品）
+arc-knowledge → 知识空间权限、文档元数据
+arc-user      → 用户 / 组织 / RBAC
+arc-audit     → 审计日志
+```
+
+届时 Python 侧的 `require_tenant()` / `QuotaGuard` 等临时鉴权逻辑由 Java 控制面正式接管。
