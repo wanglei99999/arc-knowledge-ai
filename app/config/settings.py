@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_llm_model: str = "llama3.2"
 
+    # ── JWT 认证 ──────────────────────────────────────────────────────────────
+    jwt_secret: str = Field(default="change-me-in-production", repr=False)
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24   # 默认 24 小时
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"

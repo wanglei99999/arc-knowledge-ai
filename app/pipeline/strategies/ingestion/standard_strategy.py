@@ -5,6 +5,10 @@ from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
 from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
 from app.pipeline.stages.embedding.embed_stage import EmbedStage
+from app.pipeline.hooks.idempotency_guard import IdempotencyGuard
+from app.pipeline.hooks.observability_hook import ObservabilityHook
+from app.pipeline.hooks.quota_guard import QuotaGuard
+from app.pipeline.hooks.tenant_guard import TenantGuard
 from app.pipeline.stages.embedding.es_index_stage import ESIndexStage
 from app.pipeline.stages.embedding.milvus_index_stage import MilvusIndexStage
 from app.pipeline.stages.parsing.parser_stage import ParserStage
@@ -17,13 +21,11 @@ class StandardIngestionStrategy(BaseStrategy):
     标准文档入库策略。
 
     Pipeline：ParserStage → TokenChunkerStage → EmbedStage → MilvusIndexStage → ESIndexStage
-
-    Phase 0：无 Hook（hooks = []）
-    Phase 3 开启后添加：[TenantGuard, ObservabilityHook, QuotaGuard, IdempotencyGuard]
+    Hooks（按 priority 顺序）：TenantGuard(10) → QuotaGuard(20) → IdempotencyGuard(30) → ObservabilityHook(100)
     """
 
     strategy_id = "standard"
-    hooks = []  # Phase 3 再填充
+    hooks = [TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]
 
     def build_pipeline(self, doc_type: str, config: TenantConfig) -> Pipeline:
         return (

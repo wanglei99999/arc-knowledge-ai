@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers import chat, document, search
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
+from app.infrastructure.redis.client import close as redis_close
 
 
 def _register_components() -> None:
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     # 关闭：释放连接池
     await dispose()
+    await redis_close()
 
 
 app = FastAPI(

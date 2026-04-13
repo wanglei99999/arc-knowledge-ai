@@ -5,6 +5,10 @@ from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
 from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
 from app.pipeline.stages.embedding.embed_stage import EmbedStage
+from app.pipeline.hooks.idempotency_guard import IdempotencyGuard
+from app.pipeline.hooks.observability_hook import ObservabilityHook
+from app.pipeline.hooks.quota_guard import QuotaGuard
+from app.pipeline.hooks.tenant_guard import TenantGuard
 from app.pipeline.stages.embedding.es_index_stage import ESIndexStage
 from app.pipeline.stages.embedding.milvus_index_stage import MilvusIndexStage
 from app.pipeline.stages.parsing.parser_stage import ParserStage
@@ -17,14 +21,11 @@ class OCRIngestionStrategy(BaseStrategy):
     扫描件入库策略，使用 PaddleOCR 解析。
 
     Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage → MilvusIndexStage → ESIndexStage
-
-    与 StandardIngestionStrategy 的区别：
-    - parser_provider 强制使用 paddleocr_parser
-    - chunk_size 默认更小（扫描件 OCR 结果噪声多，短段更准确）
+    Hooks（按 priority 顺序）：TenantGuard(10) → QuotaGuard(20) → IdempotencyGuard(30) → ObservabilityHook(100)
     """
 
     strategy_id = "ocr"
-    hooks = []  # Phase 3 再填充
+    hooks = [TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]
 
     def build_pipeline(self, doc_type: str, config: TenantConfig) -> Pipeline:
         # 强制走 OCR provider，覆盖租户配置中的 parser_provider

@@ -132,39 +132,36 @@ class HookRunner:
 
 ---
 
-## Phase 3 会实现的 4 个 Hook
+## Phase 3 实现的 4 个 Hook
 
 ### TenantGuard（priority=10，最先）
 
 ```
 Phase: PRE_PIPELINE
-职责：
-  - 验证 tenant_id 在数据库中存在且未被禁用
-  - 注入 PG SET LOCAL app.current_tenant_id（激活 RLS）
-  - 确保后续所有 DB 操作都带 tenant_id 过滤
+职责：正则校验 tenant_id 格式（3-64位字母数字连字符，首尾不能是连字符）
+失败：raise ValueError（不是 ABORT，格式错误属于调用方 bug）
 ```
 
-四道防线中的第二道（第一道是 Context 创建时必须传 tenant_id）。
+Phase 4 可升级为：查租户注册表，验证租户状态（active / suspended）。
 
 ### QuotaGuard（priority=20）
 
 ```
-Phase: PRE_PIPELINE + POST_PIPELINE
-职责：
-  PRE:  检查 ctx.quota.has_api_quota()，不够就 ABORT
-  POST: 扣减实际消耗（向 quota_usage 表写入）
+Phase: PRE_PIPELINE
+职责：检查 ctx.quota.has_api_quota() 和 ctx.quota.has_storage_quota()
+失败：raise QuotaExceededError（不是 ABORT）
 ```
 
-为什么分 PRE 和 POST？因为不知道这次处理会消耗多少 token，只能先检查"还有没有余量"，处理完再扣实际消耗。
+> **注意**：实际实现只有 PRE_PIPELINE，没有 POST 扣减。配额快照在请求开始时固化在 Context，本期不写入数据库。
 
 ### IdempotencyGuard（priority=30）
 
 ```
-Phase: PRE_STAGE
-职责：
-  - 计算 Stage 身份 = hash(document_id + stage_name + content_hash)
-  - 如果这个身份在 Redis 里存在 → 返回 SKIP_STAGE
-  - 否则 → 返回 CONTINUE，并在 POST_STAGE 后写入 Redis
+Phase: PRE_STAGE + POST_STAGE（同一个 Hook 处理两个时机）
+Key 格式：idempotency:{task_id}:{stage_name}
+
+PRE_STAGE：redis.exists(key) → 存在则返回 SKIP_STAGE
+POST_STAGE：redis.setex(key, 86400, "1") → 打完成标记，TTL 24h
 ```
 
 崩溃重试时，已完成的 Stage 会被跳过，不会重复调用 OpenAI API（省钱）。
@@ -172,33 +169,42 @@ Phase: PRE_STAGE
 ### ObservabilityHook（priority=100，最后）
 
 ```
-Phase: PRE_STAGE + POST_STAGE + ON_ERROR
+Phase: PRE_PIPELINE / PRE_STAGE / POST_STAGE / POST_PIPELINE / ON_ERROR（全部）
 职责：
-  - PRE_STAGE:  开始 OpenTelemetry Span
-  - POST_STAGE: 结束 Span，记录 Prometheus Histogram（stage 耗时）
-  - ON_ERROR:   记录错误日志（带 tenant_id, document_id, stage_name）
+  PRE_PIPELINE：记录 Pipeline 开始时间到 ctx.metadata
+  PRE_STAGE：   记录 Stage 开始时间到 ctx.metadata
+  POST_STAGE：  计算耗时（time.monotonic），logging.info 打印 elapsed_ms
+  POST_PIPELINE：打印 Pipeline 总耗时
+  ON_ERROR：    logging.error 记录错误（exc_info=True）
 ```
+
+> Phase 4 再接 OpenTelemetry Span 和 Prometheus Histogram，当前只用标准 logging。
 
 ---
 
-## 执行顺序示例（Phase 3 激活后）
-
-处理一个 Stage 时，Hook 执行顺序：
+## 执行顺序示例（Phase 3 实际行为）
 
 ```
-PRE_STAGE 触发：
-  10  TenantGuard.handle()    → CONTINUE（租户合法）
-  20  QuotaGuard.handle()     → CONTINUE（配额充足）
-  30  IdempotencyGuard.handle() → CONTINUE 或 SKIP_STAGE
- 100  ObservabilityHook.handle() → CONTINUE（开始计时）
+PRE_PIPELINE 触发：
+  10  TenantGuard    → 校验格式，失败抛 ValueError
+  20  QuotaGuard     → 校验配额，失败抛 QuotaExceededError
+ 100  ObservabilityHook → 记录 Pipeline 开始时间
+
+PRE_STAGE 触发（每个 Stage 前）：
+  30  IdempotencyGuard → redis.exists → SKIP_STAGE 或 CONTINUE
+ 100  ObservabilityHook → 记录 Stage 开始时间
 
 [Stage._execute() 执行]
 
-POST_STAGE 触发：
-  10  TenantGuard.handle()    → 不处理 POST_STAGE，跳过
-  20  QuotaGuard.handle()     → 不处理 POST_STAGE，跳过
-  30  IdempotencyGuard.handle() → 写入完成标记到 Redis
- 100  ObservabilityHook.handle() → 结束计时，记录 metrics
+POST_STAGE 触发（每个 Stage 后）：
+  30  IdempotencyGuard → redis.setex 写完成标记
+ 100  ObservabilityHook → 打印 elapsed_ms
+
+POST_PIPELINE 触发：
+ 100  ObservabilityHook → 打印 Pipeline 总耗时
+
+ON_ERROR 触发：
+ 100  ObservabilityHook → 打印错误日志
 ```
 
 ---

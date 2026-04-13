@@ -40,6 +40,12 @@
 | [15](./15-retrieval-pipeline.md) | Retrieval Pipeline | SearchContext 是什么？RRF 怎么算？为什么顺序 Pipeline 能做混合检索？ | `pipeline/stages/retrieval/` |
 | [16](./16-full-flow-v3.md) | 完整链路追踪 v3 | 一次搜索和一次问答各经历了什么？SSE 怎么工作？ | 全部 |
 
+### Phase 3（v4.0）— 多租户 + 横切关注点
+
+| 编号 | 文档 | 核心问题 | 对应代码 |
+|------|------|---------|---------|
+| [17](./17-hooks-jwt.md) | Hook 实现 + JWT 认证 | 四个 Hook 各做什么？IdempotencyGuard 如何防重复？JWT Depends 怎么工作？ | `pipeline/hooks/` + `api/dependencies.py` |
+
 ---
 
 ## 快速参考

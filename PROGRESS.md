@@ -214,16 +214,28 @@ POST /chat
 
 ---
 
-## Phase 3：多租户 + 横切关注点 ⬜
+## Phase 3：多租户 + 横切关注点 ✅
 
 **目标**：激活 Hook 系统，实现租户隔离、配额、幂等、可观测性。
 
-- [ ] `pipeline/hooks/tenant_guard.py`
-- [ ] `pipeline/hooks/quota_guard.py`
-- [ ] `pipeline/hooks/idempotency_guard.py`
-- [ ] `pipeline/hooks/observability_hook.py`
-- [ ] `StandardIngestionStrategy.hooks` 填充
-- [ ] JWT 验证接入（`api/dependencies.py` 升级）
+- [x] `pipeline/hooks/tenant_guard.py` — TenantGuard，PRE_PIPELINE，priority=10，格式校验
+- [x] `pipeline/hooks/quota_guard.py` — QuotaGuard，PRE_PIPELINE，priority=20，API/存储配额检查
+- [x] `pipeline/hooks/idempotency_guard.py` — IdempotencyGuard，PRE+POST_STAGE，priority=30，Redis TTL 24h
+- [x] `pipeline/hooks/observability_hook.py` — ObservabilityHook，全 Phase，priority=100，耗时日志
+- [x] `StandardIngestionStrategy.hooks` + `OCRIngestionStrategy.hooks` 已填充四个 Hook
+- [x] `infrastructure/redis/client.py` — 异步 Redis 客户端（连接池）
+- [x] `api/dependencies.py` — JWT 验证（Bearer Token），非生产环境保留 X-Tenant-Id fallback
+- [x] `config/settings.py` — 新增 `jwt_secret` / `jwt_algorithm` / `jwt_expire_minutes`
+
+### Hook 执行顺序（每次 Pipeline 运行）
+
+```
+PRE_PIPELINE：  TenantGuard(10) → QuotaGuard(20)
+PRE_STAGE：     IdempotencyGuard(30) → ObservabilityHook(100)
+POST_STAGE：    IdempotencyGuard(30，写 Redis） → ObservabilityHook(100，记耗时)
+POST_PIPELINE： ObservabilityHook(100，记总耗时)
+ON_ERROR：      ObservabilityHook(100，记错误)
+```
 
 ---
 
