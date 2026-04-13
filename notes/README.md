@@ -24,6 +24,7 @@
 | [10](./10-service-api.md) | Service + API 层 | 请求从 HTTP 到业务逻辑的路径 | `services/` + `api/` |
 | [11](./11-full-flow.md) | 完整链路追踪 v1 | 一个文件上传后发生了什么？（Phase 0） | 全部 |
 | [12](./python_basic_knowledge/01-python-basics.md) | Python 语法补充 | 看懂项目里常见的抽象类、泛型与 `with` 语法 | `stage.py` + `workflow.py` |
+| [12-2](./python_basic_knowledge/02-decorators.md) | Python 装饰器 | 为什么 `@xxx(...)` 总会变成 `def -> def -> return`？ | `registry.py` |
 
 ### Phase 1（v2.0）— 完整 Ingestion
 

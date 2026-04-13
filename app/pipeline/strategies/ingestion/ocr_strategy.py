@@ -5,6 +5,7 @@ from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
 from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
 from app.pipeline.stages.embedding.embed_stage import EmbedStage
+from app.pipeline.stages.embedding.es_index_stage import ESIndexStage
 from app.pipeline.stages.embedding.milvus_index_stage import MilvusIndexStage
 from app.pipeline.stages.parsing.parser_stage import ParserStage
 from app.pipeline.strategies.base_strategy import BaseStrategy
@@ -15,7 +16,7 @@ class OCRIngestionStrategy(BaseStrategy):
     """
     扫描件入库策略，使用 PaddleOCR 解析。
 
-    Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage → MilvusIndexStage
+    Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage → MilvusIndexStage → ESIndexStage
 
     与 StandardIngestionStrategy 的区别：
     - parser_provider 强制使用 paddleocr_parser
@@ -33,4 +34,5 @@ class OCRIngestionStrategy(BaseStrategy):
             .then(TokenChunkerStage())
             .then(EmbedStage())
             .then(MilvusIndexStage())
+            .then(ESIndexStage())
         )
