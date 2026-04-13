@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app.api.routers import chat, document, search
+from app.api.routers import admin, chat, document, search
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
@@ -74,6 +74,7 @@ app.add_middleware(
 app.include_router(document.router)
 app.include_router(search.router)
 app.include_router(chat.router)
+app.include_router(admin.router)
 
 
 @app.get("/health", tags=["ops"])

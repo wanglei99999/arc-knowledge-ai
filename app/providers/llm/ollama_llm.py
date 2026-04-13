@@ -22,7 +22,9 @@ class OllamaLLMProvider(LLMProvider):
 
     def __init__(self) -> None:
         self._base_url = settings.ollama_base_url.rstrip("/")
-        self._model = settings.ollama_llm_model
+        # 优先使用运行时热切换的模型，否则读 settings 默认值
+        from app.providers.llm.model_state import get_current_model
+        self._model = get_current_model(settings.ollama_llm_model)
 
     async def health_check(self) -> HealthStatus:
         try:

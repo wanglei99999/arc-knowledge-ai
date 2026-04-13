@@ -53,6 +53,12 @@
 > ObservabilityHook 在 POST_STAGE 额外发送 OTel Span 和 Prometheus metrics，属于副作用，不改变主链路。
 > 架构决策见 [ADR-016](../docs/adr/ADR-016-opentelemetry-observability.md) 和 [ADR-017](../docs/adr/ADR-017-temporal-workflow-versioning.md)。
 
+### Phase 5（v6.0）— 多模型路由
+
+> 请求链路与 v4 相同，无需新增 full-flow 文档。
+> LLM 调用路径新增 ModelHub → ResilientLLMProvider 层，对 RAGOrchestrator 透明。
+> 架构决策见 [ADR-018](../docs/adr/ADR-018-model-hub-resilient-routing.md) 和 [ADR-019](../docs/adr/ADR-019-ollama-hot-switch.md)。
+
 ---
 
 ## 快速参考

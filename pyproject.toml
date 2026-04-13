@@ -32,6 +32,8 @@ dependencies = [
     "openai>=1.30",
     # HTTP 客户端
     "httpx>=0.27",
+    # 熔断 / 重试
+    "tenacity>=8.3",
     # 可观测性
     "opentelemetry-sdk>=1.24",
     "opentelemetry-exporter-otlp>=1.24",

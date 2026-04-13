@@ -274,8 +274,39 @@ Pipeline 运行
 
 ---
 
-## Phase 5：多模型路由 ⬜
+## Phase 5：多模型路由 ✅
 
-- [ ] `ModelHub` 路由策略
-- [ ] 熔断 / 降级（`tenacity` 重试）
-- [ ] Ollama 本地模型热切换
+**目标**：LLM Provider 智能路由，支持熔断降级和 Ollama 热切换。
+
+- [x] `providers/llm/model_state.py` — 模块级 Ollama 模型状态，`set_current_model()` / `get_current_model()`
+- [x] `providers/llm/resilient_llm.py` — `ResilientLLMProvider`：tenacity 重试 + fallback 自动切换
+- [x] `providers/llm/model_hub.py` — `ModelHub`：按 ctx.config.llm_provider 路由，主备相同时跳过包装
+- [x] `providers/llm/ollama_llm.py` — `__init__` 改为读 `get_current_model()`，支持热切换
+- [x] `workflows/rag_orchestrator.py` — `_get_llm_provider()` 改用 `model_hub.get_provider(ctx)`
+- [x] `api/routers/admin.py` — `POST /admin/models/switch`、`DELETE /admin/models/switch`、`GET /admin/models/current`
+- [x] `config/settings.py` — 新增 `llm_fallback_provider` / `llm_max_retries` / `llm_retry_min_wait` / `llm_retry_max_wait`
+- [x] `pyproject.toml` — 新增 `tenacity>=8.3`
+
+### 熔断降级流程
+
+```
+RAGOrchestrator._get_llm_provider(ctx)
+  → ModelHub.get_provider(ctx)
+      → ResilientLLMProvider(primary=openai_llm, fallback=ollama_llm)
+
+generate() 调用：
+  tenacity 重试（最多 3 次，指数退避 1~10s）
+    → 全部失败 → 自动切换 fallback Provider
+
+stream_generate() 调用：
+  主 Provider 首个 token 前失败 → 自动切换 fallback
+  已开始推送 token 后失败      → 直接报错（无法回滚）
+```
+
+### 新增接口
+
+| 接口 | 说明 |
+|------|------|
+| `POST /admin/models/switch?model=mistral` | 热切换 Ollama 模型 |
+| `DELETE /admin/models/switch` | 重置为 settings 默认 |
+| `GET /admin/models/current` | 查询当前生效模型 |

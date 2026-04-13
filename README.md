@@ -2,7 +2,7 @@
 
 多租户知识库系统的数据面服务，负责文档入库（Ingestion）和知识检索（Retrieval）。
 
-当前版本 **v5.0**，已完成 Pipeline 框架、全量存储接入、混合检索与 RAG 流式问答、多租户 Hook 系统、OTel 可观测性与 K8s 部署配置。
+当前版本 **v6.0**，已完成 Pipeline 框架、全量存储接入、混合检索与 RAG 流式问答、多租户 Hook 系统、OTel 可观测性、K8s 部署配置与多模型路由熔断降级。
 
 ---
 
@@ -193,6 +193,9 @@ flowchart TD
 | `POST` | `/chat` | RAG 问答，SSE 流式输出 |
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/metrics` | Prometheus metrics 端点 |
+| `POST` | `/admin/models/switch` | 热切换 Ollama 模型 |
+| `DELETE` | `/admin/models/switch` | 重置为默认模型 |
+| `GET` | `/admin/models/current` | 查询当前生效模型 |
 
 ---
 
@@ -221,7 +224,7 @@ arc-knowledge-ai/
 │   │   ├── base.py                    # EmbeddingProvider / LLMProvider / ParserProvider / RerankProvider
 │   │   ├── parser/                    # unstructured_provider / paddleocr_provider
 │   │   ├── embedding/                 # openai_embedding
-│   │   └── llm/                       # openai_llm / ollama_llm
+│   │   └── llm/                       # openai_llm / ollama_llm / model_hub / resilient_llm / model_state
 │   ├── infrastructure/
 │   │   ├── postgres/                  # 连接池 / ChunkRepository
 │   │   ├── milvus/                    # 向量写入 / ANN 检索
@@ -240,7 +243,8 @@ arc-knowledge-ai/
 │   └── api/routers/
 │       ├── document.py                # /documents 路由
 │       ├── search.py                  # /search 路由
-│       └── chat.py                    # /chat 路由（SSE）
+│       ├── chat.py                    # /chat 路由（SSE）
+│       └── admin.py                   # /admin 路由（模型热切换）
 ├── scripts/
 │   ├── migrate.py                     # PostgreSQL 建表（幂等）
 │   └── start_worker.py                # 启动 Temporal Worker
@@ -263,7 +267,7 @@ arc-knowledge-ai/
 | **v3.0** | RAG 检索生成（混合检索 + RRF + LLM 流式） | ✅ 完成 |
 | **v4.0** | Hook 系统激活（租户隔离 / 配额 / 幂等 / 可观测性）+ JWT 认证 | ✅ 完成 |
 | **v5.0** | OpenTelemetry + Prometheus + Workflow 版本化 + K8s 部署 | ✅ 完成 |
-| v6.0 | 多模型路由（ModelHub + 熔断 + Ollama 热切换） | 规划中 |
+| **v6.0** | 多模型路由（ModelHub + 熔断降级 + Ollama 热切换） | ✅ 完成 |
 
 ---
 

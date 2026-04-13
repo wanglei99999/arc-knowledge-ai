@@ -8,6 +8,7 @@ from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
+from app.providers.llm.model_hub import model_hub
 
 # 系统 Prompt 模板
 _SYSTEM_PROMPT = """你是一个知识库问答助手。请根据以下检索到的文档片段回答用户问题。
@@ -50,7 +51,7 @@ class RAGOrchestrator:
         )
 
     def _get_llm_provider(self, ctx: ProcessingContext) -> LLMProvider:
-        return registry.get_provider(ctx.config.llm_provider)  # type: ignore[return-value]
+        return model_hub.get_provider(ctx)
 
     async def retrieve(
         self,

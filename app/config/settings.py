@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     otel_service_name: str = "arc-knowledge-ai"
     otlp_endpoint: str = "http://localhost:4317"  # Jaeger / Tempo gRPC 端点
 
+    # ── ModelHub / 熔断降级 ───────────────────────────────────────────────────
+    llm_fallback_provider: str = "ollama_llm"   # 主模型失败时切换的备用 Provider
+    llm_max_retries: int = 3                    # tenacity 最大重试次数
+    llm_retry_min_wait: float = 1.0             # 最小等待秒数
+    llm_retry_max_wait: float = 10.0            # 最大等待秒数
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"
