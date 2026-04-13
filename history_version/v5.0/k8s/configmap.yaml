@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arc-knowledge-config
+  namespace: arc-knowledge
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "INFO"
+
+  # PostgreSQL
+  POSTGRES_URL: "postgresql+asyncpg://arc:$(POSTGRES_PASSWORD)@postgres-svc:5432/arc_knowledge"
+
+  # Milvus
+  MILVUS_HOST: "milvus-svc"
+  MILVUS_PORT: "19530"
+
+  # Elasticsearch
+  ES_URL: "http://elasticsearch-svc:9200"
+
+  # Redis
+  REDIS_URL: "redis://redis-svc:6379/0"
+
+  # MinIO
+  MINIO_ENDPOINT: "minio-svc:9000"
+  MINIO_BUCKET: "arc-documents"
+  MINIO_SECURE: "false"
+
+  # Temporal
+  TEMPORAL_HOST: "temporal-svc:7233"
+  TEMPORAL_NAMESPACE: "default"
+  TEMPORAL_TASK_QUEUE: "arc-ingestion"
+
+  # OpenAI
+  OPENAI_EMBEDDING_MODEL: "text-embedding-3-small"
+  OPENAI_LLM_MODEL: "gpt-4o-mini"
+
+  # Ollama
+  OLLAMA_BASE_URL: "http://ollama-svc:11434"
+  OLLAMA_LLM_MODEL: "llama3.2"
+
+  # JWT
+  JWT_ALGORITHM: "HS256"
+  JWT_EXPIRE_MINUTES: "1440"
+
+  # OpenTelemetry
+  OTEL_ENABLED: "true"
+  OTEL_SERVICE_NAME: "arc-knowledge-ai"
+  OTLP_ENDPOINT: "http://jaeger-svc:4317"

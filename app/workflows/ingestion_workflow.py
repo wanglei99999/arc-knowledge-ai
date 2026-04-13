@@ -20,6 +20,10 @@ _RETRY = RetryPolicy(
     maximum_interval=timedelta(minutes=5),
 )
 
+# Workflow 版本常量
+# 每次修改 Workflow 执行逻辑时递增，用于 workflow.patched() 安全滚动升级
+_V1 = 1  # Phase 4：当前版本，三 Activity 顺序链路
+
 
 @workflow.defn(name="IngestionWorkflow")
 class IngestionWorkflow:
@@ -31,10 +35,23 @@ class IngestionWorkflow:
     不会重跑已完成的 Activity（Checkpoint 语义）。
 
     parse → chunk → embed_and_index
+
+    版本化说明（workflow.patched）：
+    当需要修改 Workflow 执行逻辑时，使用 workflow.patched("patch-id") 区分新旧代码路径，
+    确保已在执行中的旧 Workflow 不受影响。新 Workflow 走新路径，旧 Workflow 走旧路径。
+
+    示例（未来某次变更时的写法）：
+        if workflow.patched("add-validation-activity"):
+            await workflow.execute_activity(validate_activity, ...)
+        # else: 旧 Workflow 跳过该步骤
     """
 
     @workflow.run
     async def run(self, inp: IngestionInput) -> dict:
+        # 版本标记：标识当前 Workflow 逻辑版本（Phase 4）
+        # 未来修改 Workflow 逻辑时，在此处新增 patched() 分支
+        workflow.patched("phase4-three-stage-pipeline")
+
         # Activity 1: 解析
         parsed_dict = await workflow.execute_activity(
             parse_activity,

@@ -5,11 +5,14 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.routers import chat, document, search
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
+from app.infrastructure.telemetry.otel import setup_tracing
 
 
 def _register_components() -> None:
@@ -41,6 +44,9 @@ def _register_components() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # 启动：初始化 OTel tracing
+    if settings.otel_enabled:
+        setup_tracing(settings.otel_service_name, settings.otlp_endpoint)
     # 启动：注册所有组件
     _register_components()
     yield
@@ -73,3 +79,9 @@ app.include_router(chat.router)
 @app.get("/health", tags=["ops"])
 async def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/metrics", tags=["ops"], include_in_schema=False)
+async def metrics() -> PlainTextResponse:
+    """Prometheus metrics 端点，供 Prometheus scrape。"""
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)

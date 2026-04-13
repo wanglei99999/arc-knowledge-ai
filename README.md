@@ -2,7 +2,7 @@
 
 多租户知识库系统的数据面服务，负责文档入库（Ingestion）和知识检索（Retrieval）。
 
-当前版本 **v3.0**，已完成 Pipeline 框架、全量存储接入、混合检索与 RAG 流式问答。
+当前版本 **v5.0**，已完成 Pipeline 框架、全量存储接入、混合检索与 RAG 流式问答、多租户 Hook 系统、OTel 可观测性与 K8s 部署配置。
 
 ---
 
@@ -17,7 +17,7 @@ graph TD
     C["Orchestration Layer\nTemporal Workflow（Ingestion）· RAGOrchestrator（同步）"]
     D["Pipeline Layer\nStrategy › Pipeline › Stage₁ › … › Stageₙ"]
     E["Provider Layer\nParser / Embedding / LLM / Rerank"]
-    F["Infrastructure Layer\nPostgreSQL · Milvus · MinIO · Elasticsearch"]
+    F["Infrastructure Layer\nPostgreSQL · Milvus · MinIO · Elasticsearch · Redis · Telemetry"]
 
     A --> B --> C --> D --> E --> F
 
@@ -91,9 +91,16 @@ class OpenAILLMProvider(LLMProvider): ...
 | `ocr` | 扫描件入库（PaddleOCR 解析） |
 | `hybrid` | 混合检索（向量 + BM25 + RRF） |
 
-### 5. Hook 系统（Phase 3 激活）
+### 5. Hook 系统
 
-横切能力（配额、幂等性、可观测性、租户隔离）通过 Hook 注入，不侵入 Stage 代码。当前 `hooks = []`，Phase 3 填入 `[TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]`。
+横切能力（配额、幂等性、可观测性、租户隔离）通过 Hook 注入，不侵入 Stage 代码。所有 Ingestion Strategy 已激活 `[TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]`。
+
+| Hook | Phase | priority | 职责 |
+|------|-------|----------|------|
+| `TenantGuard` | PRE_PIPELINE | 10 | 校验 tenant_id 格式 |
+| `QuotaGuard` | PRE_PIPELINE | 20 | 检查 API / 存储配额 |
+| `IdempotencyGuard` | PRE_STAGE + POST_STAGE | 30 | Redis TTL 24h 幂等标记 |
+| `ObservabilityHook` | 全 Phase | 100 | OTel Span + Prometheus metrics + 日志 |
 
 ### 6. 双链路编排
 
@@ -112,7 +119,7 @@ class OpenAILLMProvider(LLMProvider): ...
 | **PostgreSQL** | chunk 文本、元数据、文档状态 | embed_and_index_activity |
 | **Milvus** | chunk 向量（1536维，HNSW索引） | embed_and_index_activity |
 | **Elasticsearch** | chunk 原文（BM25 倒排索引） | embed_and_index_activity |
-| **Redis** | 预留（幂等 key，Phase 3） | — |
+| **Redis** | 幂等 key（`idempotency:{task_id}:{stage_name}`，TTL 24h） | IdempotencyGuard POST_STAGE |
 
 ---
 
@@ -185,6 +192,7 @@ flowchart TD
 | `GET` | `/search` | 混合检索，返回 hits + chunk 原文 |
 | `POST` | `/chat` | RAG 问答，SSE 流式输出 |
 | `GET` | `/health` | 健康检查 |
+| `GET` | `/metrics` | Prometheus metrics 端点 |
 
 ---
 
@@ -200,6 +208,7 @@ arc-knowledge-ai/
 │   │   └── retrieval.py               # RetrievalQuery / SearchHit / SearchContext / RetrievalResult
 │   ├── pipeline/
 │   │   ├── core/                      # context / stage / pipeline / hook / registry
+│   │   ├── hooks/                     # tenant_guard / quota_guard / idempotency_guard / observability_hook
 │   │   ├── stages/
 │   │   │   ├── parsing/               # parser_stage
 │   │   │   ├── chunking/              # token_chunker
@@ -217,7 +226,9 @@ arc-knowledge-ai/
 │   │   ├── postgres/                  # 连接池 / ChunkRepository
 │   │   ├── milvus/                    # 向量写入 / ANN 检索
 │   │   ├── minio/                     # 文件上传 / 下载
-│   │   └── elasticsearch/             # BM25 索引 / 全文检索
+│   │   ├── elasticsearch/             # BM25 索引 / 全文检索
+│   │   ├── redis/                     # 异步连接池（幂等 key 存储）
+│   │   └── telemetry/                 # OTel TracerProvider / Prometheus metrics 定义
 │   ├── workflows/
 │   │   ├── ingestion_workflow.py      # Temporal Workflow 定义
 │   │   ├── ingestion_activities.py    # 三个 Activity 实现
@@ -235,6 +246,7 @@ arc-knowledge-ai/
 │   └── start_worker.py                # 启动 Temporal Worker
 ├── tests/
 │   └── unit/                          # Pipeline / Stage / Provider 单元测试
+├── k8s/                               # K8s 部署配置（namespace / configmap / secret / deployment）
 ├── docker-compose.yml                 # PostgreSQL / MinIO / Milvus / ES / Redis / Temporal 一键启动
 ├── notes/                             # 设计文档与学习笔记
 └── PROGRESS.md                        # 各阶段进度
@@ -249,8 +261,8 @@ arc-knowledge-ai/
 | **v1.0** | Pipeline 框架 + 单文档入库链路 | ✅ 完成 |
 | **v2.0** | MinIO 文件存储 + Milvus 向量写入 + OCR 支持 | ✅ 完成 |
 | **v3.0** | RAG 检索生成（混合检索 + RRF + LLM 流式） | ✅ 完成 |
-| v4.0 | Hook 系统激活（租户隔离 / 配额 / 幂等 / 可观测性） | 规划中 |
-| v5.0 | OpenTelemetry + Prometheus + K8s 部署 | 规划中 |
+| **v4.0** | Hook 系统激活（租户隔离 / 配额 / 幂等 / 可观测性）+ JWT 认证 | ✅ 完成 |
+| **v5.0** | OpenTelemetry + Prometheus + Workflow 版本化 + K8s 部署 | ✅ 完成 |
 | v6.0 | 多模型路由（ModelHub + 熔断 + Ollama 热切换） | 规划中 |
 
 ---

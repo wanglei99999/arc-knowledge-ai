@@ -45,6 +45,13 @@
 | 编号 | 文档 | 核心问题 | 对应代码 |
 |------|------|---------|---------|
 | [17](./17-hooks-jwt.md) | Hook 实现 + JWT 认证 | 四个 Hook 各做什么？IdempotencyGuard 如何防重复？JWT Depends 怎么工作？ | `pipeline/hooks/` + `api/dependencies.py` |
+| [18](./18-full-flow-v4.md) | 全链路追踪 v4 | JWT 认证如何接入？Hook 如何在 Pipeline 每个 Stage 前后触发？ | 全部 |
+
+### Phase 4（v5.0）— 高可用 + 可观测性
+
+> 请求链路与 v4 相同，无需新增 full-flow 文档。
+> ObservabilityHook 在 POST_STAGE 额外发送 OTel Span 和 Prometheus metrics，属于副作用，不改变主链路。
+> 架构决策见 [ADR-016](../docs/adr/ADR-016-opentelemetry-observability.md) 和 [ADR-017](../docs/adr/ADR-017-temporal-workflow-versioning.md)。
 
 ---
 

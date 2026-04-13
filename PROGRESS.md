@@ -239,12 +239,38 @@ ON_ERROR：      ObservabilityHook(100，记错误)
 
 ---
 
-## Phase 4：高可用 + 可观测性 ⬜
+## Phase 4：高可用 + 可观测性 ✅
 
-- [ ] OpenTelemetry 接入（Jaeger）
-- [ ] Prometheus metrics 导出
-- [ ] Temporal Workflow 版本化
-- [ ] K8s 部署配置
+**目标**：接入生产级可观测性，支持安全滚动升级和容器化部署。
+
+- [x] `infrastructure/telemetry/otel.py` — OTel TracerProvider，OTLP gRPC 导出（Jaeger）
+- [x] `infrastructure/telemetry/metrics.py` — Prometheus Histogram（stage 耗时）+ Counter（pipeline 总数）
+- [x] `pipeline/hooks/observability_hook.py` — 升级：OTel Span + Prometheus metrics + logging
+- [x] `config/settings.py` — 新增 `otel_enabled` / `otel_service_name` / `otlp_endpoint`
+- [x] `main.py` — lifespan 初始化 OTel，新增 `GET /metrics` Prometheus 端点
+- [x] `workflows/ingestion_workflow.py` — `workflow.patched("phase4-three-stage-pipeline")` 版本标记
+- [x] `k8s/namespace.yaml` — arc-knowledge 命名空间
+- [x] `k8s/configmap.yaml` — 非敏感配置（环境变量）
+- [x] `k8s/secret.yaml` — 敏感配置模板（openai_key / jwt_secret 等）
+- [x] `k8s/api-deployment.yaml` — FastAPI Deployment（2 副本）+ ClusterIP Service
+- [x] `k8s/worker-deployment.yaml` — Temporal Worker Deployment（2 副本）
+- [x] `k8s/jaeger.yaml` — Jaeger all-in-one（开发用，生产换 Tempo）
+
+### 可观测性链路
+
+```
+Pipeline 运行
+  → ObservabilityHook
+      ├── OTel Span → OTLP → Jaeger（分布式追踪）
+      ├── Prometheus Histogram → /metrics → Prometheus → Grafana
+      └── logging → 标准输出 → 日志收集器
+```
+
+### 新增接口
+
+| 接口 | 说明 |
+|------|------|
+| `GET /metrics` | Prometheus metrics 端点（不在 Swagger 显示） |
 
 ---
 

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24   # 默认 24 小时
 
+    # ── OpenTelemetry ─────────────────────────────────────────────────────────
+    otel_enabled: bool = True
+    otel_service_name: str = "arc-knowledge-ai"
+    otlp_endpoint: str = "http://localhost:4317"  # Jaeger / Tempo gRPC 端点
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"
