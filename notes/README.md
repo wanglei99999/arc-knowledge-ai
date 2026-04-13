@@ -58,6 +58,28 @@
 > 请求链路与 v4 相同，无需新增 full-flow 文档。
 > LLM 调用路径新增 ModelHub → ResilientLLMProvider 层，对 RAGOrchestrator 透明。
 > 架构决策见 [ADR-018](../docs/adr/ADR-018-model-hub-resilient-routing.md) 和 [ADR-019](../docs/adr/ADR-019-ollama-hot-switch.md)。
+>
+> ⚠️ **已知局限**：`model_state.py` 全局可变状态在 K8s 多副本时不一致；`TenantConfig` 仍为硬编码默认值。Phase 6 修复。
+
+### Phase 6（v7.0）— 多租户模型路由
+
+> 📋 **设计中，尚未实现。**
+>
+> 核心改动：删除 `model_state.py` 全局状态，新增 `tenant_configs` 表，实现三层模型解析（请求级 > 租户默认 > 系统默认）。
+> 仅解决"用哪个模型"的路由问题，不涉及计量计费。
+>
+> 参考设计讨论：基于 Cursor / Claude Code 模型选择机制分析，结合多租户架构提出。
+>
+> 架构决策见 ADR-020（待生成）。
+
+### Phase 7（v8.0）— 模型用量追踪 + 费用配额
+
+> 📋 **设计中，依赖 Phase 6。**
+>
+> 核心改动：新增 `model_configs`（定价目录）+ `usage_records`（用量流水）表，将 `QuotaSnapshot` 从计次升级为计费，`ObservabilityHook` 负责记录每次 LLM 调用的实际 token 消耗与费用。
+> 解决"用了多少、花了多少"的计量问题。
+>
+> 架构决策见 ADR-021（待生成）。
 
 ---
 
