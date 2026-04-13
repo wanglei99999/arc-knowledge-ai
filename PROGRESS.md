@@ -310,3 +310,118 @@ stream_generate() 调用：
 | `POST /admin/models/switch?model=mistral` | 热切换 Ollama 模型 |
 | `DELETE /admin/models/switch` | 重置为 settings 默认 |
 | `GET /admin/models/current` | 查询当前生效模型 |
+
+### ⚠️ 已知设计局限（Phase 6 待修复）
+
+| 问题 | 位置 | 影响 |
+|------|------|------|
+| 全局可变模型状态 | `providers/llm/model_state.py` | K8s 多副本时各实例状态不一致；所有租户共享同一覆盖值 |
+| TenantConfig 硬编码默认值 | `rag_orchestrator.py:64,96,109` | 每次都 `TenantConfig(tenant_id=...)` 用默认值，无法按租户差异化配置 |
+| 模型名固定在 `__init__` | `openai_llm.py:21` | OpenAI 无热切换能力；模型与 Provider 实例强耦合 |
+
+---
+
+## Phase 6：多租户模型路由 📋 设计中
+
+**基于 Phase 5（v6.0）改进，版本目标 v7.0**
+
+**目标**：修复全局模型状态与硬编码 TenantConfig 两个架构局限，实现真正的多租户模型路由。计量与计费能力见 Phase 7。
+
+### 三层模型解析优先级
+
+```
+POST /chat { "model": "gpt-4o" }     ← ③ 请求级覆盖，本次生效
+        ↓ 未指定时
+TenantConfig.default_llm_model       ← ② 租户默认，持久化在 PostgreSQL
+        ↓ 未配置时
+settings.openai_llm_model            ← ① 系统默认，配置文件
+```
+
+### 新增 DB 表
+
+| 表 | 核心字段 | 用途 |
+|----|---------|------|
+| `tenant_configs` | `tenant_id`, `default_llm_provider`, `default_llm_model`, `allowed_models`(JSONB), `updated_at` | 持久化每个租户的模型偏好与权限白名单 |
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `infrastructure/postgres/repositories/tenant_config_repo.py` | 租户配置 CRUD，`load(tenant_id)` 替代硬编码 `TenantConfig()` |
+
+### 修改文件
+
+| 文件 | 改动内容 | 对应 Phase 5 局限 |
+|------|---------|-----------------|
+| `pipeline/core/context.py` | `TenantConfig` 新增 `llm_model: str \| None`、`allowed_models: list[str]` 字段 | — |
+| `providers/llm/model_hub.py` | 实现三层解析逻辑；校验请求 model 是否在 `allowed_models` 白名单内 | 替换全局 model_state |
+| `providers/llm/openai_llm.py` | `generate/stream_generate` 接受 `model` 参数，不再依赖 `__init__` 固化的 `self._model` | OpenAI 无热切换 |
+| `providers/llm/ollama_llm.py` | 同上，删除 `get_current_model()` 调用 | 全局可变状态 |
+| `workflows/rag_orchestrator.py` | 改用 `TenantConfigRepository.load(tenant_id)` 加载真实配置，透传 `model` 参数 | 硬编码默认值 |
+| `api/routers/chat.py` | `ChatRequestBody` 新增可选 `model: str \| None` 字段 | 支持请求级覆盖 |
+| `api/routers/admin.py` | 替换为租户配置管理接口 | 全局 switch 不支持多租户 |
+| `scripts/migrate.py` | 新增 `tenant_configs` 建表 | — |
+
+### 删除文件
+
+| 文件 | 原因 |
+|------|------|
+| `providers/llm/model_state.py` | 全局可变状态反模式，由 `TenantConfigRepository` + `TenantConfig.llm_model` 替代 |
+
+### API 变更
+
+| 旧接口（v6.0，废弃） | 新接口（v7.0） | 说明 |
+|---|---|---|
+| `POST /admin/models/switch` | `PUT /admin/tenants/{tenant_id}/config` | 全局改为租户级 |
+| `DELETE /admin/models/switch` | （同上，`default_llm_model: null`） | 重置租户模型偏好 |
+| `GET /admin/models/current` | `GET /admin/tenants/{tenant_id}/config` | 查询租户完整配置 |
+
+---
+
+## Phase 7：模型用量追踪 + 费用配额 📋 设计中
+
+**依赖 Phase 6（v7.0），版本目标 v8.0**
+
+**目标**：在 Phase 6 确定"用了哪个模型"之后，进一步记录"用了多少 token、花了多少钱"，将配额体系从粗粒度的"调用次数"升级为精细的"费用限额"。
+
+### 两个系统的职责边界
+
+| 系统 | Phase | 回答的问题 |
+|------|-------|----------|
+| 模型路由 | Phase 6 | 用哪个模型？租户是否有权限？ |
+| 用量计量 | Phase 7 | 用了多少 token？花了多少钱？配额是否超限？ |
+
+### 新增 DB 表
+
+| 表 | 核心字段 | 用途 |
+|----|---------|------|
+| `model_configs` | `model_id`, `provider_id`, `display_name`, `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `is_available` | 模型定价目录 |
+| `usage_records` | `id`, `tenant_id`, `model_id`, `input_tokens`, `output_tokens`, `cost_usd`, `created_at` | 每次 LLM 调用的用量流水 |
+
+### QuotaSnapshot 升级
+
+```
+# 当前（Phase 0~6）：计次
+max_api_calls_per_day   → 最多调用 100 次
+used_api_calls_today    → 今天用了 50 次
+
+# Phase 7：计费（兼容旧计次，两套并存）
+max_spend_per_day       → 今天最多花 $5.00
+used_spend_today        → 今天已花 $2.30
+```
+
+### 核心改动
+
+| 文件 | 改动内容 |
+|------|---------|
+| `pipeline/hooks/quota_guard.py` | PRE_PIPELINE 新增费用预估校验：基于请求估算 token 数 × 单价 < 剩余配额 |
+| `pipeline/hooks/observability_hook.py` | POST_PIPELINE 新增用量记录：解析 LLM 返回的 `usage`（input/output tokens），计算实际费用，写 `usage_records` |
+| `pipeline/core/context.py` | `QuotaSnapshot` 新增 `max_spend_per_day`、`used_spend_today` 字段 |
+| `scripts/migrate.py` | 新增 `model_configs` + `usage_records` 建表 |
+
+### 新增接口
+
+| 接口 | 说明 |
+|------|------|
+| `GET /admin/tenants/{tenant_id}/usage` | 查询租户用量汇总（按天/按模型分组） |
+| `GET /admin/models` | 查询可用模型列表及定价 |
