@@ -321,67 +321,144 @@ stream_generate() 调用：
 
 ---
 
-## Phase 6：文档删除 📋 设计中
+## Phase 6：文档删除 ✅
 
 **版本目标 v7.0**
 
 **目标**：补全文档生命周期，支持从四个存储中联动删除，解决数据只增不减的问题。
 
-### 新增文件
-
-| 文件 | 说明 |
-|------|------|
-| `workflows/ingestion_activities.py` | 新增 `delete_activity`，Temporal 保证四处清理原子性 |
-| `services/document_service.py` | 新增 `delete()` 方法，协调四处存储清理 |
-
 ### 修改文件
 
 | 文件 | 改动 |
 |------|------|
-| `api/routers/document.py` | 新增 `DELETE /documents/{id}` 接口 |
+| `app/domain/document.py` | 新增 `DELETING` / `DELETED` 两个状态及转换规则 |
+| `app/infrastructure/postgres/repositories/chunk_repo.py` | 新增 `get_document_meta()` / `delete_chunks_by_document()` |
+| `app/services/document_service.py` | 新增 `DeleteResult` dataclass + `delete()` 方法 |
+| `app/api/routers/document.py` | 新增 `DELETE /documents/{id}` 接口 |
 
 ### 清理链路
 
 ```
 DELETE /documents/{id}
   → DocumentService.delete()
-  → Temporal DeleteActivity
-      ├── MinIO: 删除原始文件
-      ├── Milvus: 按 document_id 删除向量
-      ├── Elasticsearch: 按 document_id 删除全文索引
-      └── PostgreSQL: 更新 document 状态 + 删除 chunks
+      1. get_document_meta()          — 查元数据 + file_path
+      2. status = DELETING            — 防并发重复删除
+      3. MinIO: delete_file()         — 物理删原始文件
+      4. Milvus: delete_by_document() — 物理删向量
+      5. ES: delete_by_document()     — 物理删全文索引
+      6. PG: delete_chunks_by_document() — 物理删 chunks
+      7. status = DELETED             — 逻辑删文档记录（保留审计）
 ```
+
+### 删除策略说明
+
+| 存储层 | 删除方式 | 原因 |
+|--------|----------|------|
+| MinIO / Milvus / ES / PG chunks | 物理删除 | 派生数据，存储成本高，无独立审计价值 |
+| PG documents 记录 | **逻辑删除** | 保留审计（谁、何时、删了什么），防误删，合规要求 |
+
+> 架构决策见 [ADR-020](../docs/adr/ADR-020-document-deletion-strategy.md) 和 [ADR-021](../docs/adr/ADR-021-delete-without-temporal.md)。
 
 ---
 
-## Phase 7：会话持久化 📋 设计中
+## Phase 7：三层记忆系统 📋 设计中
 
 **版本目标 v8.0**
 
-**目标**：服务端存储对话历史，支持真正的多轮对话管理，不再依赖调用方每次传入 history。
+**目标**：实现工业级三层记忆架构（工作记忆 + 情节记忆 + 语义记忆），彻底解决多轮对话上下文管理问题。参考 mem0 / Zep / MemGPT 的核心设计思路，结合已有 Milvus + ES + PG 基础设施实现。
 
-### 新增 DB 表
+### 三层记忆架构
+
+```
+Layer 1 — 工作记忆（短期，当次会话）
+  最近 10 条 messages，token 预算控制，直接放入 context window
+
+Layer 2 — 情节记忆（中期，会话历史压缩）
+  消息数 > 20 时，用 LLM 将最旧 10 条压缩为 sessions.summary
+  context 中呈现：summary + 最近 10 条 messages
+
+Layer 3 — 语义记忆（长期，跨会话事实）
+  LLM 从对话中提取结构化事实 → PG memories 表 + Milvus arc_memories collection
+  查询时语义搜索 top-5 相关记忆注入 context
+```
+
+### 新增 DB 表（3 张）
 
 | 表 | 核心字段 | 用途 |
 |----|---------|------|
-| `sessions` | `session_id`, `tenant_id`, `space_id`, `title`, `created_at` | 会话元数据 |
-| `messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 每条消息记录 |
+| `sessions` | `session_id`, `tenant_id`, `user_id`, `space_id`, `title`, `summary`, `summary_up_to`, `message_count` | 会话元数据 + 历史摘要 |
+| `messages` | `message_id`, `session_id`, `role`, `content`, `token_count` | 消息记录 |
+| `memories` | `memory_id`, `tenant_id`, `user_id`, `content`, `category`, `confidence`, `source_session_id`, `vector_id` | 长期语义记忆 |
 
-### 新增文件
+记忆分类（`category`）：`preference`（偏好）、`fact`（事实）、`context`（上下文）、`entity`（实体）
+
+### 新增文件（10 个）
 
 | 文件 | 说明 |
 |------|------|
-| `infrastructure/postgres/repositories/session_repo.py` | 会话 + 消息 CRUD |
-| `services/session_service.py` | 会话管理业务逻辑 |
-| `api/routers/session.py` | `POST /sessions`、`GET /sessions/{id}/messages`、`DELETE /sessions/{id}` |
+| `app/domain/memory.py` | `Session` / `Message` / `Memory` / `MemoryCategory` 领域模型 |
+| `app/memory/manager.py` | `MemoryManager`：记忆全生命周期调度（存/取/提取/摘要） |
+| `app/memory/assembler.py` | `ContextAssembler`：token 预算分配，组装最终 LLM context |
+| `app/memory/extractor.py` | `MemoryExtractor`：LLM 事实提取 + 历史摘要压缩 + ADD/UPDATE/NOOP 决策 |
+| `app/infrastructure/postgres/repositories/session_repo.py` | Session + Message CRUD |
+| `app/infrastructure/postgres/repositories/memory_repo.py` | Memory CRUD（按 tenant_id + user_id 查询） |
+| `app/infrastructure/milvus/memory_collection.py` | `arc_memories` collection（独立 schema，含 user_id） |
+| `app/services/session_service.py` | 会话管理业务逻辑 |
+| `app/api/routers/session.py` | Session REST API |
 
-### 修改文件
+### 修改文件（6 个）
 
 | 文件 | 改动 |
 |------|------|
-| `api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`，自动持久化每轮消息 |
-| `services/chat_service.py` | 有 `session_id` 时从 DB 加载 history，无时沿用传入值 |
-| `scripts/migrate.py` | 新增 `sessions` + `messages` 建表 |
+| `app/api/dependencies.py` | 新增 `require_user()` → 返回 `(tenant_id, user_id)`，从 JWT `sub` 提取 |
+| `app/services/chat_service.py` | 接入 `ContextAssembler`；`BackgroundTasks` 触发异步记忆提取 |
+| `app/api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`；提取 `user_id` |
+| `app/scripts/migrate.py` | 新增 3 张表 |
+| `app/main.py` | 注册 session 路由，初始化 `arc_memories` Milvus collection |
+| `app/config/settings.py` | 新增 `memory_summarization_threshold=20` / `memory_recent_messages=10` / `memory_top_k=5` / `context_window_tokens=8192` |
+
+### Chat 链路（新）
+
+```
+POST /chat (session_id, user_id)
+  → ChatService.stream_chat()
+      1. MemoryManager.add_message(user_msg)         ← 存用户消息
+      2. MemoryManager.search_memories(query)         ← 语义搜相关长期记忆
+      3. RAGOrchestrator.retrieve()                  ← 知识库检索（已有）
+      4. ContextAssembler.assemble(...)               ← token 预算组装 context
+      5. LLMProvider.stream_generate(context)         ← 流式生成（已有）
+      6. MemoryManager.add_message(assistant_msg)    ← 存 AI 回答
+      7. BackgroundTask: extract_and_store(...)       ← 后台提取记忆（不阻塞）
+      8. BackgroundTask: maybe_summarize(...)         ← 后台摘要压缩（如需）
+  → StreamingResponse (SSE)
+```
+
+### ContextAssembler Token 预算分配（总 8192，可配置）
+
+| 区域 | Token 上限 | 优先级 |
+|------|-----------|-------|
+| System prompt | ~200 | 最高（固定） |
+| RAG chunks | ≤3000 | 高（知识库内容） |
+| Recent messages | ≤2000 | 高（最近 10 条） |
+| Session summary | ≤500 | 中（历史摘要） |
+| Long-term memories | ≤1000 | 低（top-5 语义记忆） |
+| Response buffer | ~500 | 保留给 LLM 生成 |
+
+预算不足时从低优先级依次截断。
+
+### 新增 Session API
+
+| 接口 | 说明 |
+|------|------|
+| `POST /sessions` | 创建会话 |
+| `GET /sessions` | 列出当前用户所有会话 |
+| `GET /sessions/{id}` | 获取会话详情 |
+| `DELETE /sessions/{id}` | 删除会话（CASCADE 删消息） |
+| `GET /sessions/{id}/messages` | 分页获取消息列表 |
+
+### 用户身份说明
+
+JWT payload 中已包含 `sub`（user_id）字段，无需新增用户系统。`require_user()` 依赖从现有 JWT 中同时提取 `tenant_id` 和 `user_id`；非生产环境 fallback 使用 `tenant_id` 代替 `user_id`。
 
 ---
 

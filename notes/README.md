@@ -63,11 +63,13 @@
 
 ### Phase 6（v7.0）— 文档删除
 
-> 📋 **设计中。** 联动清理 MinIO / Milvus / ES / PG，补全文档生命周期。
+> ✅ **已完成。** 联动清理 MinIO / Milvus / ES / PG，补全文档生命周期。documents 记录逻辑删除，其余层物理删除。
+> 架构决策见 [ADR-020](../docs/adr/ADR-020-document-deletion-strategy.md)（混合删除策略）和 [ADR-021](../docs/adr/ADR-021-delete-without-temporal.md)（不使用 Temporal）。
 
-### Phase 7（v8.0）— 会话持久化
+### Phase 7（v8.0）— 三层记忆系统
 
-> 📋 **设计中。** 新增 `sessions` + `messages` 表，服务端存储对话历史，支持真正的多轮对话管理。
+> 📋 **设计中。** 工业级三层记忆架构：工作记忆（滑动窗口）+ 情节记忆（LLM 摘要压缩）+ 语义记忆（跨会话事实提取 + Milvus 语义搜索）。新增 `sessions` / `messages` / `memories` 三张表，新建 `app/memory/` 模块（manager / assembler / extractor），`ContextAssembler` 按 token 预算组装最终 context。参考 mem0 / Zep / MemGPT 设计。
+> 架构决策见 [ADR-022](../docs/adr/ADR-022-three-layer-memory-architecture.md)（三层架构选型）和 [ADR-023](../docs/adr/ADR-023-async-memory-extraction.md)（异步记忆提取）。
 
 ### Phase 8（v9.0）— 检索质量提升
 

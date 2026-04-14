@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.infrastructure.minio.client import build_object_key, upload_file
-from app.services.document_service import DocumentService, IngestRequest
+from app.services.document_service import DeleteResult, DocumentService, IngestRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -80,3 +80,29 @@ async def get_document_status(
 ) -> StatusResponse:
     data = await _service.get_status(document_id)
     return StatusResponse(**data)
+
+
+@router.delete(
+    "/{document_id}",
+    response_model=DeleteResult,
+    status_code=status.HTTP_200_OK,
+    summary="删除文档及其所有索引数据",
+)
+async def delete_document(
+    document_id: str,
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+) -> DeleteResult:
+    """
+    删除指定文档：
+    - documents 记录逻辑删除（status=DELETED）
+    - MinIO 原始文件、Milvus 向量、ES 索引、PG chunks 全部物理删除
+    """
+    try:
+        return await _service.delete(document_id, x_tenant_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND
+            if "not found" in str(e)
+            else status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
