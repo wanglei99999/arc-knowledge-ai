@@ -113,3 +113,40 @@ class ChunkRepository:
                 "tenant_id": tenant_id,
             })
             return [dict(row._mapping) for row in result]
+
+    async def get_document_meta(
+        self,
+        document_id: str,
+        tenant_id: str,
+    ) -> dict | None:
+        """查询文档元数据，主要用于获取 file_path（MinIO object key）"""
+        sql = text("""
+            SELECT document_id, tenant_id, file_path, status
+            FROM document
+            WHERE document_id = :document_id
+              AND tenant_id   = :tenant_id
+        """)
+        async with get_session() as session:
+            result = await session.execute(sql, {
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+            })
+            row = result.one_or_none()
+            return dict(row._mapping) if row else None
+
+    async def delete_chunks_by_document(
+        self,
+        document_id: str,
+        tenant_id: str,
+    ) -> None:
+        """物理删除指定文档的所有 chunks"""
+        sql = text("""
+            DELETE FROM document_chunk
+            WHERE document_id = :document_id
+              AND tenant_id   = :tenant_id
+        """)
+        async with get_session() as session:
+            await session.execute(sql, {
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+            })

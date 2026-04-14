@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from temporalio.client import Client
 
 from app.config.settings import settings
+from app.domain.document import DocumentStatus
+from app.infrastructure.elasticsearch.client import delete_by_document as es_delete_by_document
+from app.infrastructure.minio.client import delete_file as minio_delete_file
+from app.infrastructure.milvus.client import delete_by_document as milvus_delete_by_document
+from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.workflows.ingestion_activities import IngestionInput
 from app.workflows.ingestion_workflow import IngestionWorkflow
 
@@ -30,6 +35,12 @@ class IngestResult:
     document_id: str
     task_id: str
     workflow_run_id: str
+
+
+@dataclass
+class DeleteResult:
+    document_id: str
+    message: str = "Document deleted successfully"
 
 
 class DocumentService:
@@ -86,3 +97,32 @@ class DocumentService:
             "document_id": document_id,
             "workflow_status": desc.status.name,
         }
+
+    async def delete(self, document_id: str, tenant_id: str) -> DeleteResult:
+        """
+        删除文档：
+        - documents 表逻辑删除（status=DELETED）
+        - MinIO / Milvus / ES / PG chunks 物理删除
+        """
+        repo = ChunkRepository()
+
+        meta = await repo.get_document_meta(document_id, tenant_id)
+        if meta is None:
+            raise ValueError(f"Document {document_id} not found")
+
+        if meta["status"] in (DocumentStatus.DELETING.value, DocumentStatus.DELETED.value):
+            raise ValueError(f"Document {document_id} is already being deleted or deleted")
+
+        # 标记为删除中，防止并发重复删除
+        await repo.update_document_status(document_id, tenant_id, DocumentStatus.DELETING)
+
+        # 依次物理删除各存储层（任一失败均向上抛出，由调用方决定是否重试）
+        await minio_delete_file(meta["file_path"])
+        await milvus_delete_by_document(document_id, tenant_id)
+        await es_delete_by_document(document_id, tenant_id)
+        await repo.delete_chunks_by_document(document_id, tenant_id)
+
+        # 最后将 documents 记录逻辑删除
+        await repo.update_document_status(document_id, tenant_id, DocumentStatus.DELETED)
+
+        return DeleteResult(document_id=document_id)

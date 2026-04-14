@@ -17,6 +17,8 @@ class DocumentStatus(Enum):
     INDEXED   = "indexed"
     FAILED    = "failed"
     STALE     = "stale"      # 索引过期，需要 reindex
+    DELETING  = "deleting"   # 删除中（防并发重复删除）
+    DELETED   = "deleted"    # 已逻辑删除
 
     # 合法的状态转换表
     _TRANSITIONS: dict  # 只用于类型提示，实际定义在类外
@@ -28,9 +30,10 @@ VALID_TRANSITIONS: dict[DocumentStatus, set[DocumentStatus]] = {
     DocumentStatus.CHUNKING:  {DocumentStatus.CHUNKED, DocumentStatus.FAILED},
     DocumentStatus.CHUNKED:   {DocumentStatus.EMBEDDING, DocumentStatus.FAILED},
     DocumentStatus.EMBEDDING: {DocumentStatus.INDEXED, DocumentStatus.FAILED},
-    DocumentStatus.INDEXED:   {DocumentStatus.STALE},
-    DocumentStatus.STALE:     {DocumentStatus.PARSING},   # reindex
-    DocumentStatus.FAILED:    {DocumentStatus.PARSING},   # 重试
+    DocumentStatus.INDEXED:   {DocumentStatus.STALE, DocumentStatus.DELETING},
+    DocumentStatus.STALE:     {DocumentStatus.PARSING, DocumentStatus.DELETING},   # reindex or delete
+    DocumentStatus.FAILED:    {DocumentStatus.PARSING, DocumentStatus.DELETING},   # 重试 or delete
+    DocumentStatus.DELETING:  {DocumentStatus.DELETED},
 }
 
 
