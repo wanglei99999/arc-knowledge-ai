@@ -87,6 +87,10 @@ class LLMProvider(BaseProvider):
         """流式生成，yield token"""
         ...
 
+    def get_context_window(self) -> int:
+        """返回模型上下文窗口大小（tokens）。子类覆盖此方法返回准确值。"""
+        return 8192  # 保守默认值，确保 ResilientLLMProvider 等包装类无需修改
+
 
 # ── Parser ────────────────────────────────────────────────────────────────────
 

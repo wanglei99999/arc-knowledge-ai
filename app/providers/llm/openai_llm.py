@@ -27,6 +27,22 @@ class OpenAILLMProvider(LLMProvider):
         except Exception:
             return HealthStatus.UNHEALTHY
 
+    # model → context_window 映射（常见 OpenAI 模型）
+    _CONTEXT_WINDOWS: dict[str, int] = {
+        "gpt-4o":              128_000,
+        "gpt-4o-mini":         128_000,
+        "gpt-4-turbo":         128_000,
+        "gpt-4":                 8_192,
+        "gpt-3.5-turbo":        16_385,
+        "gpt-3.5-turbo-16k":    16_385,
+    }
+
+    def get_context_window(self) -> int:
+        for prefix, size in self._CONTEXT_WINDOWS.items():
+            if self._model.startswith(prefix):
+                return size
+        return 8_192  # 未知模型保守默认
+
     async def generate(
         self,
         ctx: ProcessingContext,

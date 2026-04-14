@@ -72,6 +72,54 @@ CREATE TABLE IF NOT EXISTS ingestion_logs (
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_logs_document
     ON ingestion_logs (document_id);
+
+-- ── Phase 7: 三层记忆系统 ──────────────────────────────────────────────────
+
+-- 会话表（Layer 1 + Layer 2 载体）
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id    VARCHAR(64)   PRIMARY KEY,
+    tenant_id     VARCHAR(64)   NOT NULL,
+    user_id       VARCHAR(64)   NOT NULL,
+    title         VARCHAR(256),
+    summary       TEXT,                          -- 情节记忆：中间段 LLM 压缩摘要
+    message_count INTEGER       NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user
+    ON sessions (tenant_id, user_id, updated_at DESC);
+
+-- 消息表
+CREATE TABLE IF NOT EXISTS messages (
+    message_id    VARCHAR(64)   PRIMARY KEY,
+    session_id    VARCHAR(64)   NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    tenant_id     VARCHAR(64)   NOT NULL,
+    user_id       VARCHAR(64)   NOT NULL,
+    role          VARCHAR(16)   NOT NULL,         -- user | assistant
+    content       TEXT          NOT NULL,
+    token_count   INTEGER       NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_session_time
+    ON messages (session_id, created_at ASC);
+
+-- 语义记忆表（Layer 3，向量存 Milvus arc_memories，文本元数据存这里）
+CREATE TABLE IF NOT EXISTS memories (
+    memory_id         VARCHAR(64)   PRIMARY KEY,
+    tenant_id         VARCHAR(64)   NOT NULL,
+    user_id           VARCHAR(64)   NOT NULL,
+    category          VARCHAR(32)   NOT NULL,     -- fact | preference | goal
+    content           TEXT          NOT NULL,
+    source_session_id VARCHAR(64),               -- 来源 session，可为空
+    confidence        FLOAT         NOT NULL DEFAULT 1.0,
+    created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_user
+    ON memories (tenant_id, user_id, updated_at DESC);
 """
 
 

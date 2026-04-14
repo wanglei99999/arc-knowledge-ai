@@ -34,6 +34,9 @@ class OllamaLLMProvider(LLMProvider):
         except Exception:
             return HealthStatus.UNHEALTHY
 
+    def get_context_window(self) -> int:
+        return settings.ollama_context_window
+
     async def generate(
         self,
         ctx: ProcessingContext,

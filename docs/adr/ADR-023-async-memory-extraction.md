@@ -83,8 +83,27 @@ MVP：FastAPI BackgroundTasks（当前）
 
 ---
 
+## 实现备注（2026-04-14）
+
+实际实现采用 `asyncio.create_task()` 而非 `BackgroundTasks`，原因：
+
+`stream_chat` 是异步生成器（`async def ... yield`），`BackgroundTasks` 对象需在路由层注入并透传到生成器内部，造成函数签名污染。`asyncio.create_task()` 在生成器尾部（所有 token 已 yield 后）直接调度，更自然：
+
+```python
+# 生成器末尾收集完整响应后触发
+async for token in llm.stream_generate(...):
+    response_parts.append(token)
+    yield token                        # ← token 已流出
+
+asyncio.create_task(_extractor.run(...))  # ← 生成器完成后调度
+```
+
+两者可靠性相同（进程崩溃均会丢失任务），行为差异可忽略。
+
+---
+
 ## 参考
 
-- `app/services/chat_service.py` — 实现位置
-- `app/memory/manager.py` — `extract_and_store()` / `maybe_summarize()`
+- `app/services/chat_service.py` — 实现位置（`_stream_with_memory`）
+- `app/memory/extractor.py` — `MemoryExtractor.run()`
 - ADR-022 — 三层记忆架构整体决策
