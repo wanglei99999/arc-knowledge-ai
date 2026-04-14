@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     llm_retry_min_wait: float = 1.0             # 最小等待秒数
     llm_retry_max_wait: float = 10.0            # 最大等待秒数
 
+    # ── 记忆系统（Phase 7）────────────────────────────────────────────────────
+    memory_last_n: int = 10                        # 工作记忆保留的最近消息数
+    memory_top_k: int = 5                          # 语义记忆检索 top-k
+    memory_similarity_threshold: float = 0.6       # 语义记忆搜索最低相似度
+    memory_update_threshold: float = 0.9           # >= 此相似度时更新而非新增
+    ollama_context_window: int = 8192              # Ollama 模型上下文窗口大小
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"
