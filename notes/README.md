@@ -68,8 +68,8 @@
 
 ### Phase 7（v8.0）— 三层记忆系统
 
-> 📋 **设计中。** 工业级三层记忆架构：工作记忆（滑动窗口）+ 情节记忆（LLM 摘要压缩）+ 语义记忆（跨会话事实提取 + Milvus 语义搜索）。新增 `sessions` / `messages` / `memories` 三张表，新建 `app/memory/` 模块（manager / assembler / extractor），`ContextAssembler` 按 token 预算组装最终 context。参考 mem0 / Zep / MemGPT 设计。
-> 架构决策见 [ADR-022](../docs/adr/ADR-022-three-layer-memory-architecture.md)（三层架构选型）和 [ADR-023](../docs/adr/ADR-023-async-memory-extraction.md)（异步记忆提取）。
+> 📋 **设计中。** 工业级三层记忆架构：工作记忆（First-2 锚点 + 摘要 + Last-N）+ 情节记忆（LLM 摘要压缩）+ 语义记忆（跨会话事实提取 + Milvus 语义搜索）。新增 `sessions` / `messages` / `memories` 三张表，新建 `app/memory/` 模块（manager / assembler / extractor），`ContextAssembler` 按 token 预算组装最终 context。参考 mem0 / Zep / MemGPT 设计。
+> 架构决策见 [ADR-022](../docs/adr/ADR-022-three-layer-memory-architecture.md)（三层架构选型）、[ADR-023](../docs/adr/ADR-023-async-memory-extraction.md)（异步记忆提取）和 [ADR-024](../docs/adr/ADR-024-dynamic-context-window-adaptation.md)（动态上下文窗口适配）。
 
 ### Phase 8（v9.0）— 检索质量提升
 

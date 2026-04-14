@@ -371,11 +371,14 @@ DELETE /documents/{id}
 
 ```
 Layer 1 — 工作记忆（短期，当次会话）
-  最近 10 条 messages，token 预算控制，直接放入 context window
+  结构：First-2（锚点）+ Summary（中间摘要，若有）+ Last-N（最近 N 条）
+  - First-2：始终保留前 2 条消息，捕获任务目标/用户身份等"锚点"信息
+  - Last-N：token 预算内尽可能多保留最近消息（默认 10 条）
+  - 无 First-2 的系统在长对话中会丢失初始上下文（如"我是 CFO，在审并购协议"）
 
 Layer 2 — 情节记忆（中期，会话历史压缩）
-  消息数 > 20 时，用 LLM 将最旧 10 条压缩为 sessions.summary
-  context 中呈现：summary + 最近 10 条 messages
+  消息数 > 20 时，用 LLM 将 First-2 之后、Last-N 之前的中间段压缩为 sessions.summary
+  context 顺序：First-2 + summary + Last-N
 
 Layer 3 — 语义记忆（长期，跨会话事实）
   LLM 从对话中提取结构化事实 → PG memories 表 + Milvus arc_memories collection
@@ -398,7 +401,7 @@ Layer 3 — 语义记忆（长期，跨会话事实）
 |------|------|
 | `app/domain/memory.py` | `Session` / `Message` / `Memory` / `MemoryCategory` 领域模型 |
 | `app/memory/manager.py` | `MemoryManager`：记忆全生命周期调度（存/取/提取/摘要） |
-| `app/memory/assembler.py` | `ContextAssembler`：token 预算分配，组装最终 LLM context |
+| `app/memory/assembler.py` | `ContextAssembler`：按比例动态分配 token 预算（依据模型 context window），组装最终 LLM context |
 | `app/memory/extractor.py` | `MemoryExtractor`：LLM 事实提取 + 历史摘要压缩 + ADD/UPDATE/NOOP 决策 |
 | `app/infrastructure/postgres/repositories/session_repo.py` | Session + Message CRUD |
 | `app/infrastructure/postgres/repositories/memory_repo.py` | Memory CRUD（按 tenant_id + user_id 查询） |
@@ -406,7 +409,7 @@ Layer 3 — 语义记忆（长期，跨会话事实）
 | `app/services/session_service.py` | 会话管理业务逻辑 |
 | `app/api/routers/session.py` | Session REST API |
 
-### 修改文件（6 个）
+### 修改文件（7 个）
 
 | 文件 | 改动 |
 |------|------|
@@ -415,7 +418,8 @@ Layer 3 — 语义记忆（长期，跨会话事实）
 | `app/api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`；提取 `user_id` |
 | `app/scripts/migrate.py` | 新增 3 张表 |
 | `app/main.py` | 注册 session 路由，初始化 `arc_memories` Milvus collection |
-| `app/config/settings.py` | 新增 `memory_summarization_threshold=20` / `memory_recent_messages=10` / `memory_top_k=5` / `context_window_tokens=8192` |
+| `app/config/settings.py` | 新增 `memory_summarization_threshold=20` / `memory_anchor_messages=2` / `memory_recent_messages=10` / `memory_top_k=5` / `ollama_context_window=8192` |
+| `app/providers/base.py` | `LLMProvider` 新增 `get_context_window() -> int` 抽象方法 |
 
 ### Chat 链路（新）
 
@@ -433,18 +437,33 @@ POST /chat (session_id, user_id)
   → StreamingResponse (SSE)
 ```
 
-### ContextAssembler Token 预算分配（总 8192，可配置）
+### ContextAssembler Token 预算分配
 
-| 区域 | Token 上限 | 优先级 |
-|------|-----------|-------|
-| System prompt | ~200 | 最高（固定） |
-| RAG chunks | ≤3000 | 高（知识库内容） |
-| Recent messages | ≤2000 | 高（最近 10 条） |
-| Session summary | ≤500 | 中（历史摘要） |
-| Long-term memories | ≤1000 | 低（top-5 语义记忆） |
-| Response buffer | ~500 | 保留给 LLM 生成 |
+**预算按比例动态计算**，取决于当前所用模型的 `context_window`（由 `LLMProvider.get_context_window()` 提供）：
 
-预算不足时从低优先级依次截断。
+| 区域 | 占比 | 优先级 | 说明 |
+|------|------|-------|------|
+| Response buffer | 固定 500 | 最高 | 始终从总量中预先扣除 |
+| System prompt + First-2 | ~8% | 最高（固定） | 始终保留，不参与截断 |
+| RAG chunks | 40% | 高 | 知识库检索内容 |
+| Last-N 近期消息 | 25% | 高 | token 预算内尽量多取 |
+| Long-term memories | 12% | 低 | 跨会话 top-5 语义记忆 |
+| Session summary | 6% | 低 | 中间历史的 LLM 摘要 |
+
+各模型实际预算示例：
+
+| 模型 | context window | RAG | Recent | Memories | Summary |
+|------|--------------|-----|--------|----------|---------|
+| Ollama mistral | 8,192 | 3,077 | 1,923 | 923 | 461 |
+| GPT-3.5-turbo | 16,385 | 6,354 | 3,971 | 1,886 | 943 |
+| GPT-4o | 128,000 | 51,000 | 31,875 | 15,300 | 7,650 |
+| Claude Sonnet | 200,000 | 79,800 | 49,875 | 23,940 | 11,970 |
+
+摘要压缩阈值也随 context window 动态调整：小模型（<16k）= 20 条，中模型（16k–64k）= 80 条，大模型（>64k）= 200 条。
+
+组装顺序：`system → memories → First-2 → summary → Last-N → RAG chunks`
+
+预算不足时从低优先级依次截断（summary → memories → Last-N 尾部）。System prompt 和 First-2 永不截断。
 
 ### 新增 Session API
 
