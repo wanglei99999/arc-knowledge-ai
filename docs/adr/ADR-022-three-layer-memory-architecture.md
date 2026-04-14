@@ -35,11 +35,14 @@ Phase 2 的 RAG 问答依赖调用方每次传入完整 `history`，存在以下
 
 ```
 Layer 1 — 工作记忆（Working Memory）
-  最近 10 条消息，直接放入 context window
-  → 解决：当前会话连贯性
+  结构：First-2（锚点）+ Summary（若有）+ Last-N（最近 N 条）
+  - First-2：始终保留前 2 条消息，保留任务目标/用户身份等初始上下文
+  - Last-N：token 预算内尽量多保留最近消息（默认 10 条）
+  → 解决：当前会话连贯性 + 长对话不丢失初始上下文
 
 Layer 2 — 情节记忆（Episodic Memory）
-  消息数 > 20 时 LLM 压缩旧消息为摘要，存 sessions.summary
+  消息数 > 20 时 LLM 压缩 First-2 之后、Last-N 之前的中间段为摘要
+  存 sessions.summary；context 顺序：First-2 + summary + Last-N
   → 解决：长对话 context 溢出
 
 Layer 3 — 语义记忆（Semantic Memory）
