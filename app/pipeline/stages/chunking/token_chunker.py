@@ -4,6 +4,7 @@ import re
 
 from app.domain.document import DocumentChunk
 from app.pipeline.core.context import ProcessingContext
+from app.pipeline.core.registry import registry
 from app.pipeline.core.stage import BaseStage
 from app.providers.base import ParsedDocument
 
@@ -79,7 +80,7 @@ def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
 
     return chunks if chunks else [text]
 
-
+@registry.stage("token_chunker")
 class TokenChunkerStage(BaseStage[ParsedDocument, list[DocumentChunk]]):
     """
     基于 token 估算的滑窗切分 Stage。
