@@ -1,9 +1,3 @@
-"""
-arc_memories Milvus Collection
-
-与 arc_chunk_embeddings 完全独立，schema 包含 user_id 字段，
-按 tenant_id 作 Partition Key 实现租户隔离，user_id 作为搜索过滤条件。
-"""
 from __future__ import annotations
 
 import asyncio
@@ -15,11 +9,21 @@ from app.config.settings import settings
 MEMORY_COLLECTION = "arc_memories"
 
 _F_MEMORY_ID = "memory_id"
-_F_USER_ID   = "user_id"
+_F_USER_ID = "user_id"
 _F_TENANT_ID = "tenant_id"
 _F_EMBEDDING = "embedding"
 
-_MEMORY_DIM = 1536   # text-embedding-3-small 维度
+_MODEL_DIMS = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+    "text-embedding-v3": 1024,
+    "text-embedding-v4": 1024,
+}
+
+
+def _memory_dim() -> int:
+    return _MODEL_DIMS.get(settings.openai_embedding_model, 1536)
 
 
 def _client() -> MilvusClient:
@@ -32,9 +36,9 @@ def _ensure_collection(c: MilvusClient) -> None:
 
     schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
     schema.add_field(_F_MEMORY_ID, DataType.VARCHAR, max_length=64, is_primary=True)
-    schema.add_field(_F_USER_ID,   DataType.VARCHAR, max_length=64)
+    schema.add_field(_F_USER_ID, DataType.VARCHAR, max_length=64)
     schema.add_field(_F_TENANT_ID, DataType.VARCHAR, max_length=64, is_partition_key=True)
-    schema.add_field(_F_EMBEDDING, DataType.FLOAT_VECTOR, dim=_MEMORY_DIM)
+    schema.add_field(_F_EMBEDDING, DataType.FLOAT_VECTOR, dim=_memory_dim())
 
     idx = MilvusClient.prepare_index_params()
     idx.add_index(
@@ -58,13 +62,16 @@ async def upsert_memory_vector(
         _ensure_collection(c)
         c.upsert(
             collection_name=MEMORY_COLLECTION,
-            data=[{
-                _F_MEMORY_ID: memory_id,
-                _F_USER_ID:   user_id,
-                _F_TENANT_ID: tenant_id,
-                _F_EMBEDDING: embedding,
-            }],
+            data=[
+                {
+                    _F_MEMORY_ID: memory_id,
+                    _F_USER_ID: user_id,
+                    _F_TENANT_ID: tenant_id,
+                    _F_EMBEDDING: embedding,
+                }
+            ],
         )
+
     await asyncio.get_event_loop().run_in_executor(None, _do)
 
 
@@ -77,6 +84,7 @@ async def delete_memory_vector(memory_id: str) -> None:
             collection_name=MEMORY_COLLECTION,
             filter=f'{_F_MEMORY_ID} == "{memory_id}"',
         )
+
     await asyncio.get_event_loop().run_in_executor(None, _do)
 
 
@@ -87,7 +95,6 @@ async def search_memory_vectors(
     top_k: int = 5,
     score_threshold: float = 0.6,
 ) -> list[dict]:
-    """返回 [{"memory_id": ..., "score": ...}]，按相似度降序"""
     def _do() -> list[dict]:
         c = _client()
         if not c.has_collection(MEMORY_COLLECTION):
@@ -105,4 +112,5 @@ async def search_memory_vectors(
             for hit in results[0]
             if hit["distance"] >= score_threshold
         ]
+
     return await asyncio.get_event_loop().run_in_executor(None, _do)

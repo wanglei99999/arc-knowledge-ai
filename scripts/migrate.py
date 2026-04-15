@@ -27,8 +27,12 @@ CREATE TABLE IF NOT EXISTS documents (
     status          VARCHAR(32)  NOT NULL DEFAULT 'pending',
     chunk_count     INTEGER      NOT NULL DEFAULT 0,
     error_message   TEXT,
+    created_by      VARCHAR(64),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    updated_by      VARCHAR(64),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    deleted_by      VARCHAR(64),
+    deleted_at      TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_tenant_space
@@ -83,7 +87,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     title         VARCHAR(256),
     summary       TEXT,                          -- 情节记忆：中间段 LLM 压缩摘要
     message_count INTEGER       NOT NULL DEFAULT 0,
+    created_by    VARCHAR(64),
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_by    VARCHAR(64),
     updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
@@ -113,8 +119,11 @@ CREATE TABLE IF NOT EXISTS memories (
     category          VARCHAR(32)   NOT NULL,     -- fact | preference | goal
     content           TEXT          NOT NULL,
     source_session_id VARCHAR(64),               -- 来源 session，可为空
+    source_type       VARCHAR(32)   NOT NULL DEFAULT 'system', -- user | system | extractor | admin
     confidence        FLOAT         NOT NULL DEFAULT 1.0,
+    created_by        VARCHAR(64),
     created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_by        VARCHAR(64),
     updated_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 

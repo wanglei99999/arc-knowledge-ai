@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
+from openai import AsyncOpenAI
 
+from app.config.settings import settings
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.providers.base import EmbeddingProvider, HealthStatus
@@ -10,6 +11,8 @@ _DIMENSIONS: dict[str, int] = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,
+    "text-embedding-v3": 1024,
+    "text-embedding-v4": 1024,
 }
 
 
@@ -27,14 +30,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "text-embedding-3-small",
+        model: str | None = None,
     ) -> None:
-        import openai  # 懒加载
-
-        self._client = openai.AsyncOpenAI(
-            api_key=api_key or os.environ.get("OPENAI_API_KEY")
+        self._client = AsyncOpenAI(
+            api_key=api_key or settings.openai_api_key,
+            base_url=settings.openai_base_url,
         )
-        self._model = model
+        self._model = model or settings.openai_embedding_model
 
     async def embed(
         self,

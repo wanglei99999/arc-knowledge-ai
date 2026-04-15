@@ -114,6 +114,8 @@ async def search_vectors(
     """
     def _search() -> list[dict]:
         client = _get_client()
+        if not client.has_collection(COLLECTION_NAME):
+            return []
         results = client.search(
             collection_name=COLLECTION_NAME,
             data=[query_vector],

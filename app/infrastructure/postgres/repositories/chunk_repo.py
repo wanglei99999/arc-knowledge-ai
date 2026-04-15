@@ -134,6 +134,48 @@ class ChunkRepository:
             row = result.one_or_none()
             return dict(row._mapping) if row else None
 
+    async def list_documents(
+        self,
+        tenant_id: str,
+        space_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """查询文档列表，按创建时间倒序。"""
+        where = "WHERE tenant_id = :tenant_id AND status != 'deleted'"
+        params: dict = {"tenant_id": tenant_id, "limit": limit, "offset": offset}
+        if space_id:
+            where += " AND space_id = :space_id"
+            params["space_id"] = space_id
+
+        sql = text(f"""
+            SELECT id, tenant_id, space_id, original_name, mime_type,
+                   status, chunk_count, error_message, created_at, updated_at
+            FROM documents
+            {where}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        async with get_session() as session:
+            result = await session.execute(sql, params)
+            return [dict(row._mapping) for row in result]
+
+    async def count_documents(
+        self,
+        tenant_id: str,
+        space_id: str | None = None,
+    ) -> int:
+        where = "WHERE tenant_id = :tenant_id AND status != 'deleted'"
+        params: dict = {"tenant_id": tenant_id}
+        if space_id:
+            where += " AND space_id = :space_id"
+            params["space_id"] = space_id
+
+        sql = text(f"SELECT COUNT(*) FROM documents {where}")
+        async with get_session() as session:
+            result = await session.execute(sql, params)
+            return result.scalar() or 0
+
     async def delete_chunks_by_document(
         self,
         document_id: str,
