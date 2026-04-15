@@ -82,6 +82,33 @@ async def get_document_status(
     return StatusResponse(**data)
 
 
+@router.get(
+    "",
+    summary="查询文档列表",
+)
+async def list_documents(
+    space_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+) -> dict:
+    return await _service.list_documents(x_tenant_id, space_id, limit, offset)
+
+
+@router.get(
+    "/{document_id}/chunks",
+    summary="查询文档切片列表",
+)
+async def list_chunks(
+    document_id: str,
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+) -> dict:
+    from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+    repo = ChunkRepository()
+    chunks = await repo.get_chunks_by_document(document_id, x_tenant_id)
+    return {"items": chunks, "total": len(chunks)}
+
+
 @router.delete(
     "/{document_id}",
     response_model=DeleteResult,

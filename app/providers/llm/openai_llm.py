@@ -17,7 +17,10 @@ class OpenAILLMProvider(LLMProvider):
     provider_id = "openai_llm"
 
     def __init__(self) -> None:
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self._client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+        )
         self._model = settings.openai_llm_model
 
     async def health_check(self) -> HealthStatus:

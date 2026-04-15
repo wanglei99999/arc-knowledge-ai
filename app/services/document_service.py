@@ -98,6 +98,18 @@ class DocumentService:
             "workflow_status": desc.status.name,
         }
 
+    async def list_documents(
+        self,
+        tenant_id: str,
+        space_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        repo = ChunkRepository()
+        documents = await repo.list_documents(tenant_id, space_id, limit, offset)
+        total = await repo.count_documents(tenant_id, space_id)
+        return {"items": documents, "total": total}
+
     async def delete(self, document_id: str, tenant_id: str) -> DeleteResult:
         """
         删除文档：

@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "arc-ingestion"
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
+    openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = Field(default="", repr=False)
     openai_embedding_model: str = "text-embedding-3-small"
     openai_llm_model: str = "gpt-4o-mini"
