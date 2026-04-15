@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.infrastructure.minio.client import build_object_key, upload_file
+from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.services.document_service import DeleteResult, DocumentService, IngestRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -45,12 +46,23 @@ async def upload_document(
 
     mime_type = file.content_type or "application/octet-stream"
 
-    # Phase 1：上传到 MinIO，用 document_id 作为 object key 避免文件名冲突
+    # 上传到 MinIO
     import uuid
     document_id = str(uuid.uuid4())
     data = await file.read()
     object_key = build_object_key(x_tenant_id, space_id, document_id, file.filename)
     await upload_file(data, object_key, content_type=mime_type)
+
+    # 创建 documents 记录（对应架构中 arc-knowledge 控制面的职责，MVP 阶段由 Python API 代劳）
+    repo = ChunkRepository()
+    await repo.create_document(
+        document_id=document_id,
+        tenant_id=x_tenant_id,
+        space_id=space_id,
+        original_name=file.filename,
+        mime_type=mime_type,
+        file_path=object_key,
+    )
 
     req = IngestRequest(
         tenant_id=x_tenant_id,

@@ -57,7 +57,7 @@ async def upload_file(
 
 
 async def download_file(object_key: str, bucket: str | None = None) -> bytes:
-    """从 MinIO 下载文件，返回原始字节。"""
+    """从 MinIO 下载文件，返回原始字节。小文件适用。"""
     bucket = bucket or settings.minio_bucket
 
     def _download() -> bytes:
@@ -67,6 +67,29 @@ async def download_file(object_key: str, bucket: str | None = None) -> bytes:
 
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _download)
+
+
+async def download_file_to_path(
+    object_key: str,
+    local_path: str,
+    bucket: str | None = None,
+    chunk_size: int = 1024 * 1024,  # 1MB
+) -> None:
+    """
+    流式下载到本地文件，内存只占一个 chunk。
+    适用于大文件（100MB+），避免将整个文件加载到内存。
+    """
+    bucket = bucket or settings.minio_bucket
+
+    def _stream_download() -> None:
+        client = _make_client()
+        response = client.get_object(Bucket=bucket, Key=object_key)
+        with open(local_path, "wb") as f:
+            for chunk in response["Body"].iter_chunks(chunk_size=chunk_size):
+                f.write(chunk)
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _stream_download)
 
 
 async def delete_file(object_key: str, bucket: str | None = None) -> None:
