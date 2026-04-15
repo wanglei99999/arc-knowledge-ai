@@ -12,6 +12,7 @@ from app.providers.base import EmbeddingProvider
 _DEFAULT_BATCH_SIZE = 100
 
 
+@registry.stage("embedder")
 class EmbedStage(BaseStage[list[DocumentChunk], list[DocumentChunk]]):
     """
     批量 Embedding Stage。

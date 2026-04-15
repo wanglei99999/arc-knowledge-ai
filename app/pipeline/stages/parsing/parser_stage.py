@@ -7,6 +7,7 @@ from app.pipeline.core.stage import BaseStage
 from app.providers.base import ParsedDocument, ParserProvider
 
 
+@registry.stage("parser")
 class ParserStage(BaseStage[RawFile, ParsedDocument]):
     """
     通用文档解析 Stage。
