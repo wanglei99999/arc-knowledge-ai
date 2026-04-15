@@ -16,6 +16,33 @@ class ChunkRepository:
     Phase 1 可换成 SQLAlchemy ORM 或 SQLModel。
     """
 
+    async def create_document(
+        self,
+        document_id: str,
+        tenant_id: str,
+        space_id: str,
+        original_name: str,
+        mime_type: str,
+        file_path: str,
+    ) -> None:
+        """在 documents 表写入初始记录（status=pending），触发 Workflow 前调用。"""
+        sql = text("""
+            INSERT INTO documents
+                (id, tenant_id, space_id, original_name, mime_type, file_path, status)
+            VALUES
+                (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path, 'pending')
+            ON CONFLICT (id) DO NOTHING
+        """)
+        async with get_session() as session:
+            await session.execute(sql, {
+                "id": document_id,
+                "tenant_id": tenant_id,
+                "space_id": space_id,
+                "original_name": original_name,
+                "mime_type": mime_type,
+                "file_path": file_path,
+            })
+
     async def save_chunks(self, chunks: list[DocumentChunk]) -> None:
         """批量 upsert chunks（按 chunk_id 冲突时更新）"""
         if not chunks:
@@ -30,29 +57,49 @@ class ChunkRepository:
                 "chunk_index": c.chunk_index,
                 "token_count": c.token_count,
                 "metadata": json.dumps(c.metadata),
-                "embedding": c.embedding,   # pgvector: list[float] 直接传
             }
             for c in chunks
         ]
 
         sql = text("""
-            INSERT INTO document_chunk
+            INSERT INTO document_chunks
                 (chunk_id, document_id, tenant_id, content, chunk_index,
-                 token_count, metadata, embedding)
+                 token_count, metadata, embedding_status, embedded_at)
             VALUES
                 (:chunk_id, :document_id, :tenant_id, :content, :chunk_index,
-                 :token_count, :metadata::jsonb, :embedding)
+                 :token_count, :metadata, 'current', NOW())
             ON CONFLICT (chunk_id) DO UPDATE SET
-                content      = EXCLUDED.content,
-                chunk_index  = EXCLUDED.chunk_index,
-                token_count  = EXCLUDED.token_count,
-                metadata     = EXCLUDED.metadata,
-                embedding    = EXCLUDED.embedding,
-                updated_at   = NOW()
+                content          = EXCLUDED.content,
+                chunk_index      = EXCLUDED.chunk_index,
+                token_count      = EXCLUDED.token_count,
+                metadata         = EXCLUDED.metadata,
+                embedding_status = 'current',
+                embedded_at      = NOW(),
+                updated_at       = NOW()
         """)
 
         async with get_session() as session:
             await session.execute(sql, rows)
+
+    async def update_chunk_count(
+        self,
+        document_id: str,
+        tenant_id: str,
+        count: int,
+    ) -> None:
+        """更新 documents.chunk_count，入库完成后调用。"""
+        sql = text("""
+            UPDATE documents
+            SET chunk_count = :count, updated_at = NOW()
+            WHERE id        = :document_id
+              AND tenant_id = :tenant_id
+        """)
+        async with get_session() as session:
+            await session.execute(sql, {
+                "count": count,
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+            })
 
     async def update_document_status(
         self,
@@ -61,10 +108,10 @@ class ChunkRepository:
         status: DocumentStatus,
     ) -> None:
         sql = text("""
-            UPDATE document
+            UPDATE documents
             SET status = :status, updated_at = NOW()
-            WHERE document_id = :document_id
-              AND tenant_id   = :tenant_id
+            WHERE id         = :document_id
+              AND tenant_id  = :tenant_id
         """)
         async with get_session() as session:
             await session.execute(sql, {
@@ -83,7 +130,7 @@ class ChunkRepository:
             return []
         sql = text("""
             SELECT chunk_id, content, document_id, chunk_index, token_count, metadata
-            FROM document_chunk
+            FROM document_chunks
             WHERE chunk_id  = ANY(:chunk_ids)
               AND tenant_id = :tenant_id
             ORDER BY chunk_index
@@ -102,7 +149,7 @@ class ChunkRepository:
     ) -> list[dict]:
         sql = text("""
             SELECT chunk_id, content, chunk_index, token_count, metadata
-            FROM document_chunk
+            FROM document_chunks
             WHERE document_id = :document_id
               AND tenant_id   = :tenant_id
             ORDER BY chunk_index
@@ -121,10 +168,10 @@ class ChunkRepository:
     ) -> dict | None:
         """查询文档元数据，主要用于获取 file_path（MinIO object key）"""
         sql = text("""
-            SELECT document_id, tenant_id, file_path, status
-            FROM document
-            WHERE document_id = :document_id
-              AND tenant_id   = :tenant_id
+            SELECT id AS document_id, tenant_id, file_path, status
+            FROM documents
+            WHERE id         = :document_id
+              AND tenant_id  = :tenant_id
         """)
         async with get_session() as session:
             result = await session.execute(sql, {
@@ -183,7 +230,7 @@ class ChunkRepository:
     ) -> None:
         """物理删除指定文档的所有 chunks"""
         sql = text("""
-            DELETE FROM document_chunk
+            DELETE FROM document_chunks
             WHERE document_id = :document_id
               AND tenant_id   = :tenant_id
         """)

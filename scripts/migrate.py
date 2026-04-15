@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_tenant_space
 CREATE INDEX IF NOT EXISTS idx_documents_status
     ON documents (status);
 
--- 文档分片表（含向量元数据，向量本体存 Milvus）
+-- 文档分片表（仅元数据 + 正文，向量本体存 Milvus，通过 chunk_id 关联）
 CREATE TABLE IF NOT EXISTS document_chunks (
     chunk_id            VARCHAR(64)   PRIMARY KEY,
     document_id         VARCHAR(64)   NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -49,11 +49,12 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     content             TEXT          NOT NULL,
     chunk_index         INTEGER       NOT NULL,
     token_count         INTEGER       NOT NULL DEFAULT 0,
-    embedding_model     VARCHAR(128),
-    embedding_status    VARCHAR(32)   NOT NULL DEFAULT 'pending',
-    embedded_at         TIMESTAMPTZ,
     metadata            JSONB         NOT NULL DEFAULT '{}',
-    created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    embedding_status    VARCHAR(32)   NOT NULL DEFAULT 'pending',
+    -- pending: 未向量化  current: 已写入 Milvus  stale: 文档更新后旧版本
+    embedded_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document

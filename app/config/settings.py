@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     minio_bucket: str = "arc-documents"
     minio_secure: bool = False
 
+    # ── 临时文件 ──────────────────────────────────────────────────────────────
+    # 大文件解析时的临时目录，生产环境建议挂载独立卷（200MB+ 文件需要足够空间）
+    temp_dir: str = "/tmp"
+
     # ── Temporal ──────────────────────────────────────────────────────────────
     temporal_host: str = "localhost:7233"
     temporal_namespace: str = "default"

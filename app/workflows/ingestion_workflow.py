@@ -53,10 +53,13 @@ class IngestionWorkflow:
         workflow.patched("phase4-three-stage-pipeline")
 
         # Activity 1: 解析
+        # start_to_close_timeout 调大到 30 分钟，覆盖 200MB 大文件的下载+解析耗时
+        # heartbeat_timeout 设为 3 分钟，Activity 内每完成一个阶段发送 heartbeat
         parsed_dict = await workflow.execute_activity(
             parse_activity,
             inp,
-            start_to_close_timeout=timedelta(minutes=10),
+            start_to_close_timeout=timedelta(minutes=30),
+            heartbeat_timeout=timedelta(minutes=3),
             retry_policy=_RETRY,
         )
 

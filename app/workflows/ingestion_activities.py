@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 
 from temporalio import activity
 
+from app.config.settings import settings
 from app.domain.document import DocumentChunk, DocumentStatus, RawFile
+from app.infrastructure.minio.client import download_file_to_path
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.pipeline import Pipeline
@@ -58,18 +62,38 @@ def _make_context(inp: IngestionInput) -> ProcessingContext:
 @activity.defn(name="parse_document")
 async def parse_activity(inp: IngestionInput) -> dict:
     """
-    Activity 1：解析文档，返回可序列化的 ParsedDocument dict
-    Temporal 要求 Activity 返回值可 JSON 序列化。
+    Activity 1：从 MinIO 流式下载到临时文件，再解析。
+
+    流式下载确保大文件（200MB+）不会撑爆内存。
+    临时文件在 finally 块中清理，无论成败都不残留。
+    heartbeat 防止 Temporal 因长时间无响应判定 Activity 超时。
     """
     ctx = _make_context(inp)
-    raw_file = RawFile(
-        file_path=inp.file_path,
-        mime_type=inp.mime_type,
-        original_filename=inp.original_filename,
-    )
 
-    parser_stage = registry.get_stage("parser")
-    parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
+    suffix = "." + inp.file_path.rsplit(".", 1)[-1] if "." in inp.file_path else ".bin"
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=suffix,
+        dir=settings.temp_dir,
+        delete=False,
+    )
+    tmp.close()
+
+    try:
+        # 流式下载：内存只占一个 chunk（1MB），不受文件大小影响
+        await download_file_to_path(inp.file_path, tmp.name)
+        activity.heartbeat("downloaded")
+
+        raw_file = RawFile(
+            file_path=tmp.name,
+            mime_type=inp.mime_type,
+            original_filename=inp.original_filename,
+        )
+        parser_stage = registry.get_stage("parser")
+        parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
+        activity.heartbeat("parsed")
+
+    finally:
+        os.unlink(tmp.name)
 
     return {"text": parsed.text, "title": parsed.title, "metadata": parsed.metadata}
 
@@ -135,6 +159,7 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
 
     repo = ChunkRepository()
     await repo.save_chunks(embedded_chunks)
+    await repo.update_chunk_count(inp.document_id, inp.tenant_id, len(embedded_chunks))
     await repo.update_document_status(
         inp.document_id, inp.tenant_id, DocumentStatus.INDEXED
     )
