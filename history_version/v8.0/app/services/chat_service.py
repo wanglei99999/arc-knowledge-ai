@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from typing import AsyncIterator
+
+from app.memory.assembler import ContextAssembler
+from app.memory.extractor import MemoryExtractor
+from app.memory.manager import MemoryManager
+from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
+from app.pipeline.core.registry import registry
+from app.providers.base import ChatMessage, LLMProvider
+from app.workflows.rag_orchestrator import RAGOrchestrator
+
+logger = logging.getLogger(__name__)
+
+_orchestrator = RAGOrchestrator()
+_manager      = MemoryManager()
+_assembler    = ContextAssembler()
+_extractor    = MemoryExtractor()
+
+_FAKE_QUOTA = QuotaSnapshot(
+    max_documents=10000, max_storage_bytes=10 * 1024 ** 3,
+    max_api_calls_per_day=100000, used_documents=0,
+    used_storage_bytes=0, used_api_calls_today=0,
+)
+
+
+@dataclass
+class ChatRequest:
+    query: str
+    tenant_id: str
+    space_id: str
+    user_id: str | None = None           # require_user() 填入
+    session_id: str | None = None        # 有 session 时启用三层记忆
+    llm_provider_name: str = "openai_llm"
+    embedding_provider_name: str = "openai_embedding"
+    history: list[dict] = field(default_factory=list)   # 无 session 时的后备历史
+    top_k: int = 10
+    score_threshold: float = 0.5
+
+
+class ChatService:
+    """
+    RAG 问答服务。
+
+    有 session_id + user_id → 三层记忆流程（工作记忆 + 语义记忆 + RAG）
+    无 session_id            → 原有简单流程（history list + RAG），向后兼容
+    """
+
+    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[str]:
+        if req.session_id and req.user_id:
+            async for token in self._stream_with_memory(req):
+                yield token
+        else:
+            async for token in self._stream_simple(req):
+                yield token
+
+    # ── 三层记忆流程 ──────────────────────────────────────────────────────────
+
+    async def _stream_with_memory(self, req: ChatRequest) -> AsyncIterator[str]:
+        assert req.session_id and req.user_id
+
+        # 1. 保存用户消息（先写，使 Last-N 包含本条）
+        await _manager.save_user_message(
+            session_id=req.session_id,
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            content=req.query,
+        )
+
+        # 2. 并行加载：工作记忆 + 语义记忆 + RAG 检索
+        working_memory, semantic_memories, rag_result = await asyncio.gather(
+            _manager.load_working_memory(req.session_id, req.tenant_id, req.user_id),
+            _manager.load_semantic_memories(
+                tenant_id=req.tenant_id,
+                user_id=req.user_id,
+                query=req.query,
+                embedding_provider_name=req.embedding_provider_name,
+            ),
+            _orchestrator.retrieve(
+                query_text=req.query,
+                tenant_id=req.tenant_id,
+                top_k=req.top_k,
+                score_threshold=req.score_threshold,
+            ),
+        )
+
+        # 3. 获取 LLM Provider
+        llm: LLMProvider = registry.get_provider(req.llm_provider_name)
+        context_window = llm.get_context_window()
+
+        # 4. 组装 context
+        messages = _assembler.build(
+            context_window=context_window,
+            working_memory=working_memory,
+            semantic_memories=semantic_memories,
+            rag_text=rag_result.context_text,
+        )
+
+        # 5. 流式生成，同步收集完整响应
+        ctx = ProcessingContext.create(
+            tenant_id=req.tenant_id,
+            document_id="",
+            quota=_FAKE_QUOTA,
+            config=TenantConfig(tenant_id=req.tenant_id),
+        )
+        response_parts: list[str] = []
+        async for token in llm.stream_generate(ctx, messages):
+            response_parts.append(token)
+            yield token
+
+        # 6. 后台：保存 assistant 消息 + 压缩 + 记忆提取
+        asyncio.create_task(
+            _extractor.run(
+                session_id=req.session_id,
+                tenant_id=req.tenant_id,
+                user_id=req.user_id,
+                assistant_response="".join(response_parts),
+                llm_provider_name=req.llm_provider_name,
+                embedding_provider_name=req.embedding_provider_name,
+            )
+        )
+
+    # ── 原有简单流程（向后兼容，无 session）─────────────────────────────────
+
+    async def _stream_simple(self, req: ChatRequest) -> AsyncIterator[str]:
+        result = await _orchestrator.retrieve(
+            query_text=req.query,
+            tenant_id=req.tenant_id,
+            top_k=req.top_k,
+            score_threshold=req.score_threshold,
+        )
+        history = [
+            ChatMessage(role=m["role"], content=m["content"])
+            for m in req.history
+        ]
+        async for token in _orchestrator.stream_generate(
+            result=result,
+            history=history,
+            tenant_id=req.tenant_id,
+        ):
+            yield token
