@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from sqlalchemy import text
 
 from app.domain.document import DocumentChunk, DocumentStatus
 from app.infrastructure.postgres.client import get_session
+
+
+def _row_to_dict(row) -> dict:
+    """将数据库行转为 dict，UUID 对象统一转为 str。"""
+    return {
+        k: str(v) if isinstance(v, uuid.UUID) else v
+        for k, v in dict(row._mapping).items()
+    }
 
 
 class ChunkRepository:
@@ -24,13 +33,14 @@ class ChunkRepository:
         original_name: str,
         mime_type: str,
         file_path: str,
+        file_size: int | None = None,
     ) -> None:
         """在 documents 表写入初始记录（status=pending），触发 Workflow 前调用。"""
         sql = text("""
             INSERT INTO documents
-                (id, tenant_id, space_id, original_name, mime_type, file_path, status)
+                (id, tenant_id, space_id, original_name, mime_type, file_path, file_size, status)
             VALUES
-                (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path, 'pending')
+                (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path, :file_size, 'pending')
             ON CONFLICT (id) DO NOTHING
         """)
         async with get_session() as session:
@@ -41,6 +51,7 @@ class ChunkRepository:
                 "original_name": original_name,
                 "mime_type": mime_type,
                 "file_path": file_path,
+                "file_size": file_size,
             })
 
     async def save_chunks(self, chunks: list[DocumentChunk]) -> None:
@@ -107,11 +118,14 @@ class ChunkRepository:
         tenant_id: str,
         status: DocumentStatus,
     ) -> None:
-        sql = text("""
+        deleted_at_clause = ", deleted_at = NOW()" if status == DocumentStatus.DELETED else ""
+        sql = text(f"""
             UPDATE documents
-            SET status = :status, updated_at = NOW()
-            WHERE id         = :document_id
-              AND tenant_id  = :tenant_id
+            SET status     = :status,
+                updated_at = NOW()
+                {deleted_at_clause}
+            WHERE id        = :document_id
+              AND tenant_id = :tenant_id
         """)
         async with get_session() as session:
             await session.execute(sql, {
@@ -129,18 +143,20 @@ class ChunkRepository:
         if not chunk_ids:
             return []
         sql = text("""
-            SELECT chunk_id, content, document_id, chunk_index, token_count, metadata
-            FROM document_chunks
-            WHERE chunk_id  = ANY(:chunk_ids)
-              AND tenant_id = :tenant_id
-            ORDER BY chunk_index
+            SELECT dc.chunk_id, dc.content, dc.document_id, dc.chunk_index,
+                   dc.token_count, dc.metadata, d.original_name
+            FROM document_chunks dc
+            LEFT JOIN documents d ON dc.document_id = d.id
+            WHERE dc.chunk_id  = ANY(:chunk_ids)
+              AND dc.tenant_id = :tenant_id
+            ORDER BY dc.chunk_index
         """)
         async with get_session() as session:
             result = await session.execute(sql, {
                 "chunk_ids": chunk_ids,
                 "tenant_id": tenant_id,
             })
-            return [dict(row._mapping) for row in result]
+            return [_row_to_dict(row) for row in result]
 
     async def get_chunks_by_document(
         self,
@@ -159,7 +175,7 @@ class ChunkRepository:
                 "document_id": document_id,
                 "tenant_id": tenant_id,
             })
-            return [dict(row._mapping) for row in result]
+            return [_row_to_dict(row) for row in result]
 
     async def get_document_meta(
         self,
@@ -179,7 +195,7 @@ class ChunkRepository:
                 "tenant_id": tenant_id,
             })
             row = result.one_or_none()
-            return dict(row._mapping) if row else None
+            return _row_to_dict(row) if row else None
 
     async def list_documents(
         self,
@@ -205,7 +221,7 @@ class ChunkRepository:
         """)
         async with get_session() as session:
             result = await session.execute(sql, params)
-            return [dict(row._mapping) for row in result]
+            return [_row_to_dict(row) for row in result]
 
     async def count_documents(
         self,

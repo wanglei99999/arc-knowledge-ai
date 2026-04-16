@@ -414,8 +414,9 @@ Layer 3 — 语义记忆（长期，跨会话事实）
 | 文件 | 改动 |
 |------|------|
 | `app/api/dependencies.py` | 新增 `require_user()` → 返回 `(tenant_id, user_id)`，从 JWT `sub` 提取 |
-| `app/services/chat_service.py` | 接入 `ContextAssembler`；`BackgroundTasks` 触发异步记忆提取 |
-| `app/api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`；提取 `user_id` |
+| `app/services/chat_service.py` | 接入 `ContextAssembler`；`BackgroundTasks` 触发异步记忆提取；新增 `_build_citations()` — 从 RAG 结果构建引用列表，`stream_chat` 返回类型改为 `AsyncIterator[str \| list]`，token 流结束后 yield citations |
+| `app/api/routers/chat.py` | `ChatRequestBody` 新增可选 `session_id`；提取 `user_id`；`_sse_stream()` 新增 `list` 分支，将 citations 序列化为 `data: {"citations": [...]}` SSE 事件 |
+| `app/infrastructure/postgres/repositories/chunk_repo.py` | `get_chunks_by_ids()` 增加 LEFT JOIN documents，直接返回 `original_name`，省去额外查询 |
 | `app/scripts/migrate.py` | 新增 3 张表 |
 | `app/main.py` | 注册 session 路由，初始化 `arc_memories` Milvus collection |
 | `app/config/settings.py` | 新增 `memory_summarization_threshold=20` / `memory_anchor_messages=2` / `memory_recent_messages=10` / `memory_top_k=5` / `ollama_context_window=8192` |
@@ -478,6 +479,67 @@ POST /chat (session_id, user_id)
 ### 用户身份说明
 
 JWT payload 中已包含 `sub`（user_id）字段，无需新增用户系统。`require_user()` 依赖从现有 JWT 中同时提取 `tenant_id` 和 `user_id`；非生产环境 fallback 使用 `tenant_id` 代替 `user_id`。
+
+---
+
+## Phase 7.5：P0 数据库演进 + Citations 完整闭环 ✅
+
+**版本目标 v8.5**
+
+**目标**：完成 P0 数据库 schema 演进，新增 spaces 和 message_citations 表，修复 UUID 主键迁移带来的兼容性问题，实现 citations 从生成到持久化到历史可见的完整闭环。
+
+### 新增表
+
+| 表 | 核心字段 | 用途 |
+|----|---------|------|
+| `spaces` | `id UUID`, `tenant_id`, `space_key`, `settings JSONB` | 知识空间（双标识：UUID PK + space_key 可读标识） |
+| `message_citations` | `message_id UUID`, `document_id UUID`, `chunk_id UUID`, `content_snapshot`, `title_snapshot` | 持久化每次 RAG 回答的引用来源，含快照字段保证历史可溯源 |
+
+### 新增 / 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `scripts/migrate.py` | 完整重写为 v2 schema：spaces、message_citations、UUID 主键、documents.file_size、sessions.space_id、部分索引 `idx_documents_active` |
+| `infrastructure/postgres/repositories/citation_repo.py` | 新增 `CitationRepository`：`save()` 批量写引用（含 UUID 合法性校验）、`get_by_message_ids()` 批量查询 |
+| `infrastructure/postgres/repositories/chunk_repo.py` | 新增 `_row_to_dict()` helper（UUID→str 统一转换）；`create_document` 加 `file_size`；`update_document_status` 转 DELETED 时原子写 `deleted_at` |
+| `infrastructure/postgres/repositories/session_repo.py` | `_row_to_session` / `_row_to_message` UUID 字段统一 `str()` 转换 |
+| `api/routers/session.py` | `GET /sessions/{id}/messages` 响应新增 `citations` 字段，批量查询后挂载到对应 assistant 消息 |
+| `domain/memory.py` | `Session` 新增 `space_id` 字段 |
+| `services/session_service.py` | `create()` 透传 `space_id` |
+| `api/routers/document.py` | 上传时传 `file_size=len(data)` |
+| `memory/extractor.py` | `run()` 加 `citations / space_id` 参数，保存 assistant 消息后调用 `CitationRepository.save()` |
+| `services/chat_service.py` | `_build_citations` 补 `chunk_id + source`；`_stream_with_memory` 向 extractor 传 citations |
+| `docs/adr/ADR-033` | 数据库演进路线 P0/P1/P2 |
+| `docs/adr/ADR-034` | SpaceSettings 工程规则 |
+| `docs/adr/ADR-035` | ingestion_jobs 作为 Temporal 运营视图 |
+| `docs/design/db-evolution-v2.md` | 完整数据库演进规格 |
+
+### 修复内容
+
+| 问题 | 修复 |
+|------|------|
+| asyncpg `AmbiguousParameterError` | `deleted_at` 写入改用 Python 条件拼接，避免 CASE 表达式类型歧义 |
+| UUID 对象 Pydantic 校验失败 | `_row_to_dict` / `_row_to_session` / `_row_to_message` 统一 UUID→str |
+| citations 静默写入失败 | `space_id / document_id / chunk_id` 加 `_valid_uuid()` 校验，非法值降级 None |
+| 刷新后 citations 消失 | `GET /sessions/{id}/messages` 批量挂载 citations，前端 `toMessageVO` 映射 citations |
+
+### Citations 完整闭环
+
+```
+POST /chat (SSE)
+  → ChatService._stream_with_memory()
+      → RAGOrchestrator.retrieve()        ← 检索
+      → yield token...                    ← 流式输出
+      → yield citations                   ← SSE 推送引用（前端实时展示）
+      → extractor.run(citations=citations)
+          → session_repo.add_message()    ← 保存 assistant 消息，拿 message_id
+          → citation_repo.save()          ← 持久化引用到 message_citations
+
+GET /sessions/{id}/messages
+  → session_service.get_messages()
+  → citation_repo.get_by_message_ids()   ← 批量查 citations
+  → MessageOut(citations=[...])          ← 返回给前端（刷新后可见）
+```
 
 ---
 

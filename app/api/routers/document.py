@@ -62,6 +62,7 @@ async def upload_document(
         original_name=file.filename,
         mime_type=mime_type,
         file_path=object_key,
+        file_size=len(data),
     )
 
     req = IngestRequest(

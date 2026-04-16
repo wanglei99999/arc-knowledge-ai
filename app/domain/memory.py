@@ -18,6 +18,7 @@ class Session:
     session_id: str
     tenant_id: str
     user_id: str
+    space_id: str | None = None      # 会话归属空间，创建后不可变
     title: str | None = None
     summary: str | None = None       # Layer 2 情节记忆：中间段压缩摘要
     message_count: int = 0

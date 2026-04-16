@@ -1,11 +1,27 @@
 """
 数据库迁移脚本：创建 ArcKnowledge 所需的 PostgreSQL 表结构。
 
+Schema 版本：v2（P0）
+相对旧版的变更：
+  新增：spaces 表（双标识 UUID id + space_key，settings JSONB）
+  新增：message_citations 表（持久化 RAG 引用，含检索快照）
+  新增：documents.file_size 字段
+  新增：sessions.space_id 字段（FK to spaces.id，暂 NULLABLE，
+        应用层适配完成后改为 NOT NULL）
+  移除：ingestion_logs 表（由 P1 的 ingestion_jobs + ingestion_job_steps 替代）
+
 用法：
     python scripts/migrate.py
 
 幂等性：所有语句使用 CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS，
 重复执行安全。
+
+清盘重建（历史数据不保留时）：
+    1. 停止 FastAPI 和 Temporal Worker
+    2. 清空 Milvus collection（drop + recreate）
+    3. 清空 Elasticsearch index（delete + recreate）
+    4. DROP SCHEMA public CASCADE; CREATE SCHEMA public;
+    5. python scripts/migrate.py
 """
 from __future__ import annotations
 
@@ -15,15 +31,47 @@ import asyncpg
 
 from app.config.settings import settings
 
+# ── P0 Schema ────────────────────────────────────────────────────────────────
+# 表创建顺序遵循外键依赖：
+#   spaces → documents → document_chunks
+#                      → sessions → messages → message_citations
+#                      → memories
+
 DDL = """
--- 文档元数据表
+-- ── 知识空间表 ───────────────────────────────────────────────────────────────
+-- 双标识：id（UUID，内部主键）+ space_key（可读标识，对接旧数据 'default'）
+-- space_key 在租户内唯一，不同租户可重名
+CREATE TABLE IF NOT EXISTS spaces (
+    id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   VARCHAR(64)  NOT NULL,
+    space_key   VARCHAR(128) NOT NULL,
+    name        VARCHAR(256),
+    description TEXT,
+    status      VARCHAR(32)  NOT NULL DEFAULT 'active',
+    -- active | archived | config_invalid
+    settings    JSONB        NOT NULL DEFAULT '{}',
+    -- 通过 SpaceSettings Pydantic 模型读写，禁止裸 dict 操作（见 ADR-034）
+    created_by  VARCHAR(64),
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_by  VARCHAR(64),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_spaces_tenant_key UNIQUE (tenant_id, space_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spaces_tenant
+    ON spaces (tenant_id);
+
+-- ── 文档元数据表 ──────────────────────────────────────────────────────────────
+-- space_id 暂保留 VARCHAR（与 space_key 对接），P0 Step-2 回填完成后改为 UUID FK
 CREATE TABLE IF NOT EXISTS documents (
-    id              VARCHAR(64)  PRIMARY KEY,
+    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       VARCHAR(64)  NOT NULL,
-    space_id        VARCHAR(64)  NOT NULL,
+    space_id        VARCHAR(128) NOT NULL DEFAULT 'default',
     original_name   VARCHAR(512) NOT NULL,
     mime_type       VARCHAR(128) NOT NULL,
-    file_path       VARCHAR(1024) NOT NULL,   -- MinIO object key
+    file_path       VARCHAR(1024) NOT NULL,  -- MinIO object key
+    file_size       BIGINT,                  -- 文件字节数，上传时记录
     status          VARCHAR(32)  NOT NULL DEFAULT 'pending',
     chunk_count     INTEGER      NOT NULL DEFAULT 0,
     error_message   TEXT,
@@ -41,20 +89,27 @@ CREATE INDEX IF NOT EXISTS idx_documents_tenant_space
 CREATE INDEX IF NOT EXISTS idx_documents_status
     ON documents (status);
 
--- 文档分片表（仅元数据 + 正文，向量本体存 Milvus，通过 chunk_id 关联）
+CREATE INDEX IF NOT EXISTS idx_documents_active
+    ON documents (tenant_id, space_id)
+    WHERE deleted_at IS NULL;
+
+-- ── 文档分片表 ────────────────────────────────────────────────────────────────
+-- 仅存文本真相，向量本体在 Milvus，通过 chunk_id 关联
 CREATE TABLE IF NOT EXISTS document_chunks (
-    chunk_id            VARCHAR(64)   PRIMARY KEY,
-    document_id         VARCHAR(64)   NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    tenant_id           VARCHAR(64)   NOT NULL,
-    content             TEXT          NOT NULL,
-    chunk_index         INTEGER       NOT NULL,
-    token_count         INTEGER       NOT NULL DEFAULT 0,
-    metadata            JSONB         NOT NULL DEFAULT '{}',
-    embedding_status    VARCHAR(32)   NOT NULL DEFAULT 'pending',
-    -- pending: 未向量化  current: 已写入 Milvus  stale: 文档更新后旧版本
-    embedded_at         TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    chunk_id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id      UUID         NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    tenant_id        VARCHAR(64)  NOT NULL,
+    content          TEXT         NOT NULL,
+    chunk_index      INTEGER      NOT NULL,
+    token_count      INTEGER      NOT NULL DEFAULT 0,
+    metadata         JSONB        NOT NULL DEFAULT '{}',
+    embedding_status VARCHAR(32)  NOT NULL DEFAULT 'pending',
+    -- pending | current | stale
+    embedded_at      TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_chunk_doc_index UNIQUE (document_id, chunk_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document
@@ -63,83 +118,118 @@ CREATE INDEX IF NOT EXISTS idx_chunks_document
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant
     ON document_chunks (tenant_id);
 
--- 入库任务日志
-CREATE TABLE IF NOT EXISTS ingestion_logs (
-    id              BIGSERIAL    PRIMARY KEY,
-    document_id     VARCHAR(64)  NOT NULL,
-    tenant_id       VARCHAR(64)  NOT NULL,
-    activity        VARCHAR(64)  NOT NULL,   -- parse / chunk / embed_and_index
-    status          VARCHAR(32)  NOT NULL,   -- started / completed / failed
-    duration_ms     INTEGER,
-    error           TEXT,
-    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_ingestion_logs_document
-    ON ingestion_logs (document_id);
-
--- ── Phase 7: 三层记忆系统 ──────────────────────────────────────────────────
-
--- 会话表（Layer 1 + Layer 2 载体）
+-- ── 会话表 ────────────────────────────────────────────────────────────────────
+-- space_id 暂 NULLABLE，应用层适配后设 NOT NULL（见 ADR-033）
 CREATE TABLE IF NOT EXISTS sessions (
-    session_id    VARCHAR(64)   PRIMARY KEY,
-    tenant_id     VARCHAR(64)   NOT NULL,
-    user_id       VARCHAR(64)   NOT NULL,
+    session_id    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id     VARCHAR(64)  NOT NULL,
+    user_id       VARCHAR(64)  NOT NULL,
+    space_id      UUID         REFERENCES spaces(id),
+    -- 创建后不可修改，对话归属空间唯一
     title         VARCHAR(256),
-    summary       TEXT,                          -- 情节记忆：中间段 LLM 压缩摘要
-    message_count INTEGER       NOT NULL DEFAULT 0,
-    created_by    VARCHAR(64),
-    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_by    VARCHAR(64),
-    updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    summary       TEXT,
+    -- Layer 2 情节记忆：中间段 LLM 压缩摘要
+    summary_up_to UUID,
+    -- 摘要截止到哪条 message_id
+    message_count INTEGER      NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user
     ON sessions (tenant_id, user_id, updated_at DESC);
 
--- 消息表
+CREATE INDEX IF NOT EXISTS idx_sessions_space
+    ON sessions (space_id);
+
+-- ── 消息表 ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (
-    message_id    VARCHAR(64)   PRIMARY KEY,
-    session_id    VARCHAR(64)   NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    tenant_id     VARCHAR(64)   NOT NULL,
-    user_id       VARCHAR(64)   NOT NULL,
-    role          VARCHAR(16)   NOT NULL,         -- user | assistant
-    content       TEXT          NOT NULL,
-    token_count   INTEGER       NOT NULL DEFAULT 0,
-    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    message_id  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id  UUID         NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    tenant_id   VARCHAR(64)  NOT NULL,
+    user_id     VARCHAR(64)  NOT NULL,
+    role        VARCHAR(16)  NOT NULL,
+    -- user | assistant
+    content     TEXT         NOT NULL,
+    token_count INTEGER      NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_time
     ON messages (session_id, created_at ASC);
 
--- 语义记忆表（Layer 3，向量存 Milvus arc_memories，文本元数据存这里）
+-- ── RAG 引用记录表 ─────────────────────────────────────────────────────────────
+-- 持久化每次 RAG 回答引用的 chunk 来源，含快照字段保证历史可溯源
+-- chunk / document 被删后仍可查看引用记录（通过快照字段）
+CREATE TABLE IF NOT EXISTS message_citations (
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id          UUID         NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+    tenant_id           VARCHAR(64)  NOT NULL,
+    space_id            UUID         REFERENCES spaces(id),
+    document_id         UUID,
+    -- 不加 FK，document 删除后记录仍保留
+    document_version_id UUID,
+    -- P1 document_versions 落地后填充
+    chunk_id            UUID,
+    -- 不加 FK，chunk 删除后记录仍保留
+    rank                INTEGER,
+    -- 在本次检索结果中的排名（1-based）
+    score               FLOAT,
+    -- RRF / 向量相似度分数
+    retrieval_mode      VARCHAR(32),
+    -- 'vector' | 'keyword' | 'hybrid'
+    content_snapshot    TEXT         NOT NULL,
+    -- chunk 原文快照，独立存在，不依赖 document_chunks
+    title_snapshot      VARCHAR(512),
+    -- 文档名快照
+    created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_citations_message
+    ON message_citations (message_id);
+
+CREATE INDEX IF NOT EXISTS idx_citations_document
+    ON message_citations (document_id);
+
+-- ── 语义记忆表（Layer 3）──────────────────────────────────────────────────────
+-- 向量本体存 Milvus arc_memories collection，此处存文本元数据
 CREATE TABLE IF NOT EXISTS memories (
-    memory_id         VARCHAR(64)   PRIMARY KEY,
-    tenant_id         VARCHAR(64)   NOT NULL,
-    user_id           VARCHAR(64)   NOT NULL,
-    category          VARCHAR(32)   NOT NULL,     -- fact | preference | goal
-    content           TEXT          NOT NULL,
-    source_session_id VARCHAR(64),               -- 来源 session，可为空
-    source_type       VARCHAR(32)   NOT NULL DEFAULT 'system', -- user | system | extractor | admin
-    confidence        FLOAT         NOT NULL DEFAULT 1.0,
-    created_by        VARCHAR(64),
-    created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_by        VARCHAR(64),
-    updated_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    memory_id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id         VARCHAR(64)  NOT NULL,
+    user_id           VARCHAR(64)  NOT NULL,
+    category          VARCHAR(32)  NOT NULL,
+    -- fact | preference | goal | context | entity
+    content           TEXT         NOT NULL,
+    source_session_id UUID         REFERENCES sessions(session_id) ON DELETE SET NULL,
+    source_type       VARCHAR(32)  NOT NULL DEFAULT 'system',
+    -- user | system | extractor | admin
+    confidence        FLOAT        NOT NULL DEFAULT 1.0,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_user
     ON memories (tenant_id, user_id, updated_at DESC);
 """
 
+# ── P1 预留（下一阶段执行）───────────────────────────────────────────────────
+# document_versions、document_files、ingestion_jobs、ingestion_job_steps
+# SpaceSettings 解析框架（应用层，无 DDL）
+# 详见 docs/design/db-evolution-v2.md § P1
+
+# ── P2 预留 ──────────────────────────────────────────────────────────────────
+# chunk_index_states、messages 增加 model_provider/model_name、audit_events
+# 详见 docs/design/db-evolution-v2.md § P2
+
 
 async def migrate() -> None:
-    # asyncpg 直接用原始 PostgreSQL URL（不带 +asyncpg 驱动前缀）
     dsn = settings.postgres_url.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(DDL)
-        print("Migration completed.")
+        print("Migration completed successfully.")
+        print("Tables created: spaces, documents, document_chunks,")
+        print("                sessions, messages, message_citations, memories")
     finally:
         await conn.close()
 
