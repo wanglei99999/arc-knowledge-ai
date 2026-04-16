@@ -19,6 +19,7 @@ from app.infrastructure.milvus.memory_collection import (
     search_memory_vectors,
     upsert_memory_vector,
 )
+from app.infrastructure.postgres.repositories.citation_repo import CitationRepository
 from app.infrastructure.postgres.repositories.memory_repo import MemoryRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
@@ -79,8 +80,9 @@ def _format_conversation(messages: list[Message]) -> str:
 
 class MemoryExtractor:
     def __init__(self) -> None:
-        self._session_repo = SessionRepository()
-        self._memory_repo  = MemoryRepository()
+        self._session_repo  = SessionRepository()
+        self._memory_repo   = MemoryRepository()
+        self._citation_repo = CitationRepository()
 
     async def run(
         self,
@@ -90,11 +92,13 @@ class MemoryExtractor:
         assistant_response: str,
         llm_provider_name: str,
         embedding_provider_name: str,
+        space_id: str | None = None,
+        citations: list[dict] | None = None,
     ) -> None:
-        """统一入口：保存 assistant 消息 → 压缩检查 → 提取记忆"""
+        """统一入口：保存 assistant 消息 → 保存 citations → 压缩检查 → 提取记忆"""
         try:
-            # 1. 保存 assistant 消息
-            await self._session_repo.add_message(
+            # 1. 保存 assistant 消息，拿到 message_id
+            msg = await self._session_repo.add_message(
                 session_id=session_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -102,7 +106,16 @@ class MemoryExtractor:
                 content=assistant_response,
             )
 
-            # 2. 获取当前 session
+            # 2. 持久化 RAG 引用来源
+            if citations:
+                await self._citation_repo.save(
+                    message_id=msg.message_id,
+                    tenant_id=tenant_id,
+                    space_id=space_id,
+                    citations=citations,
+                )
+
+            # 3. 获取当前 session
             session = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
             if session is None:
                 return
@@ -111,7 +124,7 @@ class MemoryExtractor:
             embed: EmbeddingProvider = registry.get_provider(embedding_provider_name)
             ctx = _make_ctx(tenant_id)
 
-            # 3. 压缩检查（Layer 2）
+            # 4. 压缩检查（Layer 2）
             threshold = _compress_threshold(llm.get_context_window())
             if session.message_count >= threshold:
                 await self._compress(
@@ -123,7 +136,7 @@ class MemoryExtractor:
                     ctx=ctx,
                 )
 
-            # 4. 提取记忆（Layer 3）
+            # 5. 提取记忆（Layer 3）
             await self._extract(
                 session_id=session_id,
                 tenant_id=tenant_id,

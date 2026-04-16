@@ -190,9 +190,16 @@ flowchart TD
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `POST` | `/documents/upload` | 上传文档，触发异步入库 |
+| `GET` | `/documents` | 列出所有文档（含状态） |
 | `GET` | `/documents/{id}/status` | 查询处理状态 |
+| `DELETE` | `/documents/{id}` | 删除文档（MinIO / Milvus / ES / PG 四处联动） |
+| `POST` | `/sessions` | 创建会话 |
+| `GET` | `/sessions` | 列出当前用户所有会话 |
+| `GET` | `/sessions/{id}` | 获取会话详情 |
+| `DELETE` | `/sessions/{id}` | 删除会话（CASCADE 删消息） |
+| `GET` | `/sessions/{id}/messages` | 分页获取消息列表 |
 | `GET` | `/search` | 混合检索，返回 hits + chunk 原文 |
-| `POST` | `/chat` | RAG 问答，SSE 流式输出 |
+| `POST` | `/chat` | RAG 问答，SSE 流式输出（含 citations 事件） |
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/metrics` | Prometheus metrics 端点 |
 | `POST` | `/admin/models/switch` | 热切换 Ollama 模型 |

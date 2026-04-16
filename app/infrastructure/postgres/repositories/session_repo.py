@@ -14,12 +14,16 @@ class SessionRepository:
     # ── Session CRUD ─────────────────────────────────────────────────────────
 
     async def create(
-        self, tenant_id: str, user_id: str, title: str | None = None
+        self,
+        tenant_id: str,
+        user_id: str,
+        title: str | None = None,
+        space_id: str | None = None,
     ) -> Session:
         session_id = str(uuid.uuid4())
         sql = text("""
-            INSERT INTO sessions (session_id, tenant_id, user_id, title)
-            VALUES (:session_id, :tenant_id, :user_id, :title)
+            INSERT INTO sessions (session_id, tenant_id, user_id, title, space_id)
+            VALUES (:session_id, :tenant_id, :user_id, :title, :space_id)
         """)
         async with get_db() as db:
             await db.execute(sql, {
@@ -27,8 +31,15 @@ class SessionRepository:
                 "tenant_id":  tenant_id,
                 "user_id":    user_id,
                 "title":      title,
+                "space_id":   space_id,
             })
-        return Session(session_id=session_id, tenant_id=tenant_id, user_id=user_id, title=title)
+        return Session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            space_id=space_id,
+            title=title,
+        )
 
     async def get_by_id(
         self, session_id: str, tenant_id: str, user_id: str
@@ -232,9 +243,10 @@ class SessionRepository:
 def _row_to_session(row) -> Session:
     r = dict(row._mapping)
     return Session(
-        session_id=r["session_id"],
+        session_id=str(r["session_id"]),
         tenant_id=r["tenant_id"],
         user_id=r["user_id"],
+        space_id=str(r["space_id"]) if r.get("space_id") else None,
         title=r.get("title"),
         summary=r.get("summary"),
         message_count=r.get("message_count", 0),
@@ -246,8 +258,8 @@ def _row_to_session(row) -> Session:
 def _row_to_message(row) -> Message:
     r = dict(row._mapping)
     return Message(
-        message_id=r["message_id"],
-        session_id=r["session_id"],
+        message_id=str(r["message_id"]),
+        session_id=str(r["session_id"]),
         tenant_id=r["tenant_id"],
         user_id=r["user_id"],
         role=r["role"],

@@ -21,9 +21,13 @@ class SessionService:
         self._memory_repo  = MemoryRepository()
 
     async def create(
-        self, tenant_id: str, user_id: str, title: str | None = None
+        self,
+        tenant_id: str,
+        user_id: str,
+        title: str | None = None,
+        space_id: str | None = None,
     ) -> Session:
-        return await self._session_repo.create(tenant_id, user_id, title)
+        return await self._session_repo.create(tenant_id, user_id, title, space_id)
 
     async def get(
         self, session_id: str, tenant_id: str, user_id: str

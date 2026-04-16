@@ -49,17 +49,34 @@ class ChatService:
     无 session_id            → 原有简单流程（history list + RAG），向后兼容
     """
 
-    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[str]:
+    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[str | list]:
         if req.session_id and req.user_id:
-            async for token in self._stream_with_memory(req):
-                yield token
+            async for item in self._stream_with_memory(req):
+                yield item
         else:
-            async for token in self._stream_simple(req):
-                yield token
+            async for item in self._stream_simple(req):
+                yield item
+
+    @staticmethod
+    def _build_citations(rag_result) -> list[dict]:
+        chunk_map = {c["chunk_id"]: c for c in rag_result.chunks}
+        return [
+            {
+                "doc_id":      h.document_id,
+                "chunk_id":    h.chunk_id,
+                "doc_name":    chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
+                "chunk_index": h.chunk_index,
+                "content":     chunk_map.get(h.chunk_id, {}).get("content", ""),
+                "score":       round(h.score, 4),
+                "source":      h.source,
+            }
+            for h in rag_result.hits
+            if h.chunk_id in chunk_map
+        ]
 
     # ── 三层记忆流程 ──────────────────────────────────────────────────────────
 
-    async def _stream_with_memory(self, req: ChatRequest) -> AsyncIterator[str]:
+    async def _stream_with_memory(self, req: ChatRequest) -> AsyncIterator[str | list]:
         assert req.session_id and req.user_id
 
         # 1. 保存用户消息（先写，使 Last-N 包含本条）
@@ -111,13 +128,20 @@ class ChatService:
             response_parts.append(token)
             yield token
 
-        # 6. 后台：保存 assistant 消息 + 压缩 + 记忆提取
+        # 6. yield citations（流结束后推送检索来源）
+        citations = self._build_citations(rag_result)
+        if citations:
+            yield citations
+
+        # 7. 后台：保存 assistant 消息 + 保存 citations + 压缩 + 记忆提取
         asyncio.create_task(
             _extractor.run(
                 session_id=req.session_id,
                 tenant_id=req.tenant_id,
                 user_id=req.user_id,
+                space_id=req.space_id,
                 assistant_response="".join(response_parts),
+                citations=citations,
                 llm_provider_name=req.llm_provider_name,
                 embedding_provider_name=req.embedding_provider_name,
             )
@@ -125,7 +149,7 @@ class ChatService:
 
     # ── 原有简单流程（向后兼容，无 session）─────────────────────────────────
 
-    async def _stream_simple(self, req: ChatRequest) -> AsyncIterator[str]:
+    async def _stream_simple(self, req: ChatRequest) -> AsyncIterator[str | list]:
         result = await _orchestrator.retrieve(
             query_text=req.query,
             tenant_id=req.tenant_id,
@@ -142,3 +166,7 @@ class ChatService:
             tenant_id=req.tenant_id,
         ):
             yield token
+
+        citations = self._build_citations(result)
+        if citations:
+            yield citations

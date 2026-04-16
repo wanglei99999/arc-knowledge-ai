@@ -24,10 +24,13 @@ class ChatRequestBody(BaseModel):
     score_threshold: float = 0.5
 
 
-async def _sse_stream(token_iter: AsyncIterator[str]) -> AsyncIterator[bytes]:
-    """将 token 流包装为 SSE 格式"""
-    async for token in token_iter:
-        payload = json.dumps({"delta": token}, ensure_ascii=False)
+async def _sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
+    """将 token / citations 流包装为 SSE 格式"""
+    async for item in event_iter:
+        if isinstance(item, list):
+            payload = json.dumps({"citations": item}, ensure_ascii=False)
+        else:
+            payload = json.dumps({"delta": item}, ensure_ascii=False)
         yield f"data: {payload}\n\n".encode()
     yield b"data: [DONE]\n\n"
 
