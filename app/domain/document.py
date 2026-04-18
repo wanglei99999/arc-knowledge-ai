@@ -43,7 +43,7 @@ class RawFile:
     file_path: str           # MinIO / 本地路径
     mime_type: str           # "application/pdf" 等
     original_filename: str
-    size_bytes: int = 0
+    size_bytes: int = 0 
 
 
 @dataclass
