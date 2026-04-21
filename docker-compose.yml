@@ -84,7 +84,9 @@ services:
 
   # ── Elasticsearch ───────────────────────────────────────────────────────────
   elasticsearch:
-    image: elasticsearch:8.13.4
+    build:
+      context: ./docker/elasticsearch
+      dockerfile: Dockerfile
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"

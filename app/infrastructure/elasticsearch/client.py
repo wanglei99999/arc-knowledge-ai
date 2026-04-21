@@ -15,7 +15,7 @@ _MAPPINGS = {
             "document_id": {"type": "keyword"},
             "tenant_id":   {"type": "keyword"},
             "chunk_index": {"type": "integer"},
-            "content":     {"type": "text", "analyzer": "standard"},
+            "content":     {"type": "text", "analyzer": "ik_max_word", "search_analyzer": "ik_smart"},
         }
     }
 }
