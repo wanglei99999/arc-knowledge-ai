@@ -15,7 +15,7 @@ _MAPPINGS = {
             "document_id": {"type": "keyword"},
             "tenant_id":   {"type": "keyword"},
             "chunk_index": {"type": "integer"},
-            "content":     {"type": "text", "analyzer": "ik_max_word", "search_analyzer": "ik_smart"},
+            "content":     {"type": "text", "analyzer": "standard"},
         }
     }
 }
@@ -28,6 +28,22 @@ def _get_client() -> Elasticsearch:
 def _ensure_index(client: Elasticsearch) -> None:
     if not client.indices.exists(index=INDEX_NAME):
         client.indices.create(index=INDEX_NAME, body=_MAPPINGS)
+
+
+async def reset_index() -> int:
+    """删除并重建 arc_chunks 索引（开发环境清盘用）。返回删除前的文档数量。"""
+    def _reset() -> int:
+        client = _get_client()
+        count = 0
+        if client.indices.exists(index=INDEX_NAME):
+            stats = client.indices.stats(index=INDEX_NAME)
+            count = stats["indices"][INDEX_NAME]["total"]["docs"]["count"]
+            client.indices.delete(index=INDEX_NAME)
+        client.indices.create(index=INDEX_NAME, body=_MAPPINGS)
+        return count
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _reset)
 
 
 async def index_chunks(chunks: list[dict]) -> None:

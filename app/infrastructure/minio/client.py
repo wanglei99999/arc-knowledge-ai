@@ -92,6 +92,30 @@ async def download_file_to_path(
     await loop.run_in_executor(None, _stream_download)
 
 
+async def empty_bucket(bucket: str | None = None) -> int:
+    """删除 bucket 内所有对象（开发环境清盘用）。返回删除的对象数量。"""
+    bucket = bucket or settings.minio_bucket
+
+    def _empty() -> int:
+        client = _make_client()
+        _ensure_bucket(client, bucket)
+        paginator = client.get_paginator("list_objects_v2")
+        deleted = 0
+        for page in paginator.paginate(Bucket=bucket):
+            objects = page.get("Contents", [])
+            if not objects:
+                continue
+            client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": [{"Key": obj["Key"]} for obj in objects]},
+            )
+            deleted += len(objects)
+        return deleted
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _empty)
+
+
 async def delete_file(object_key: str, bucket: str | None = None) -> None:
     """删除 MinIO 中的文件。"""
     bucket = bucket or settings.minio_bucket
