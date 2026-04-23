@@ -54,6 +54,21 @@ def _ensure_collection(c: MilvusClient) -> None:
     )
 
 
+async def reset_memory_collection() -> int:
+    """删除并重建 arc_memories collection（开发环境清盘用）。返回删除前的实体数量。"""
+    def _reset() -> int:
+        c = _client()
+        count = 0
+        if c.has_collection(MEMORY_COLLECTION):
+            stats = c.get_collection_stats(MEMORY_COLLECTION)
+            count = int(stats.get("row_count", 0))
+            c.drop_collection(MEMORY_COLLECTION)
+        _ensure_collection(c)
+        return count
+
+    return await asyncio.get_event_loop().run_in_executor(None, _reset)
+
+
 async def upsert_memory_vector(
     memory_id: str, user_id: str, tenant_id: str, embedding: list[float]
 ) -> None:

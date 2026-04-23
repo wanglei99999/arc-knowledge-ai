@@ -102,6 +102,25 @@ async def delete_by_document(document_id: str, tenant_id: str) -> None:
     await loop.run_in_executor(None, _delete)
 
 
+async def reset_collection() -> int:
+    """
+    删除并重建 arc_chunk_embeddings collection（开发环境清盘用）。
+    返回删除前的实体数量（0 表示 collection 不存在）。
+    """
+    def _reset() -> int:
+        client = _get_client()
+        count = 0
+        if client.has_collection(COLLECTION_NAME):
+            stats = client.get_collection_stats(COLLECTION_NAME)
+            count = int(stats.get("row_count", 0))
+            client.drop_collection(COLLECTION_NAME)
+        _ensure_collection(client, DEFAULT_DIM)
+        return count
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _reset)
+
+
 async def search_vectors(
     query_vector: list[float],
     tenant_id: str,
