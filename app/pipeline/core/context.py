@@ -38,6 +38,8 @@ class TenantConfig:
     chunk_overlap: int = 64
     top_k: int = 10
     rerank_enabled: bool = True
+    query_rewrite_enabled: bool = True
+    rerank_provider: str = "bge_rerank"
 
 
 @dataclass

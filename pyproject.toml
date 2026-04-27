@@ -48,6 +48,9 @@ dependencies = [
     # 重试
     "tenacity>=8.3",
 
+    # Rerank（BGE-Reranker）
+    "FlagEmbedding>=1.2",
+
     # 可观测性
     "opentelemetry-sdk>=1.24",
     "opentelemetry-exporter-otlp>=1.24",

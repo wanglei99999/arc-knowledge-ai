@@ -12,6 +12,8 @@ class RetrievalQuery:
     score_threshold: float = 0.5
     # QueryRewriteStage 填充；为空时各 SearchStage 直接用 query_text
     expanded_queries: list[str] = field(default_factory=list)
+    # QueryRewriteStage 意图识别结果；False 时各 SearchStage 返回空 hits
+    intent_is_valid: bool = True
 
 
 @dataclass
@@ -28,12 +30,20 @@ class SearchHit:
 @dataclass
 class SearchContext:
     """
-    Retrieval Pipeline 的数据载体。
-    各 Stage 读写此对象，最终由 RRFFusionStage 合并输出 list[SearchHit]。
+    Retrieval Pipeline 的数据载体，贯穿整条 Retrieval Pipeline。
+
+    各 Stage 只读已有字段并返回新实例（不可变模式）：
+    - QueryRewriteStage  → 填 expanded_queries / intent_is_valid
+    - VectorSearchStage  → 填 vector_hits
+    - KeywordSearchStage → 填 keyword_hits
+    - RRFFusionStage     → 填 ranked_hits
+    - RerankStage        → 读 ranked_hits，输出最终 list[SearchHit]
     """
     query: RetrievalQuery
     vector_hits: list[SearchHit] = field(default_factory=list)
     keyword_hits: list[SearchHit] = field(default_factory=list)
+    # RRFFusionStage 填充；RerankStage 读取此字段进行精排
+    ranked_hits: list[SearchHit] = field(default_factory=list)
 
 
 @dataclass
