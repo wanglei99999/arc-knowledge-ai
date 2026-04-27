@@ -34,6 +34,9 @@ class VectorSearchStage(BaseStage[SearchContext, SearchContext]):
         ctx: ProcessingContext,
         search_ctx: SearchContext,
     ) -> SearchContext:
+        if not search_ctx.query.intent_is_valid:
+            return search_ctx
+
         query = search_ctx.query
         provider = self._get_provider(ctx)
         queries = query.expanded_queries if query.expanded_queries else [query.query_text]

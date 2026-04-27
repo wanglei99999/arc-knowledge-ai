@@ -23,6 +23,9 @@ class KeywordSearchStage(BaseStage[SearchContext, SearchContext]):
         ctx: ProcessingContext,
         search_ctx: SearchContext,
     ) -> SearchContext:
+        if not search_ctx.query.intent_is_valid:
+            return search_ctx
+
         query = search_ctx.query
         raw_hits = await bm25_search(
             query_text=query.query_text,
