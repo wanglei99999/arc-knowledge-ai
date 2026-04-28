@@ -92,9 +92,8 @@ async def test_rerank_reorders_hits() -> None:
         {"chunk_id": "much-longer-chunk-id", "content": "much longer content here"},
     ]
 
-    with patch(
-        "app.pipeline.stages.retrieval.rerank_stage.ChunkRepository"
-    ) as MockRepo:
+    _CHUNK_REPO = "app.infrastructure.postgres.repositories.chunk_repo.ChunkRepository"
+    with patch(_CHUNK_REPO) as MockRepo:
         mock_repo = AsyncMock()
         mock_repo.get_chunks_by_ids.return_value = chunks
         MockRepo.return_value = mock_repo
@@ -113,7 +112,8 @@ async def test_rerank_assigns_new_scores_and_ranks() -> None:
         {"chunk_id": "c2", "content": "much longer text here"},
     ]
 
-    with patch("app.pipeline.stages.retrieval.rerank_stage.ChunkRepository") as MockRepo:
+    _CHUNK_REPO = "app.infrastructure.postgres.repositories.chunk_repo.ChunkRepository"
+    with patch(_CHUNK_REPO) as MockRepo:
         mock_repo = AsyncMock()
         mock_repo.get_chunks_by_ids.return_value = chunks
         MockRepo.return_value = mock_repo
@@ -145,7 +145,8 @@ async def test_provider_not_found_returns_rrf_order() -> None:
 async def test_chunk_fetch_failure_falls_back_to_rrf_order() -> None:
     hits = [_hit("c1", 1), _hit("c2", 2)]
 
-    with patch("app.pipeline.stages.retrieval.rerank_stage.ChunkRepository") as MockRepo:
+    _CHUNK_REPO = "app.infrastructure.postgres.repositories.chunk_repo.ChunkRepository"
+    with patch(_CHUNK_REPO) as MockRepo:
         mock_repo = AsyncMock()
         mock_repo.get_chunks_by_ids.side_effect = RuntimeError("DB error")
         MockRepo.return_value = mock_repo
