@@ -543,31 +543,64 @@ GET /sessions/{id}/messages
 
 ---
 
-## Phase 8：检索质量提升 📋 设计中
+## Phase 8：检索质量提升 ✅
 
 **版本目标 v9.0**
 
 **目标**：实现两个长期 pass-through 的 Stage，真正提升 RAG 召回率与精度。
 
-### QueryRewriteStage 真实实现
+### 架构修复：SearchContext 统一载体
 
-**当前**：直接透传原始查询。
-**改为**：调用 LLM 生成 3 个语义变体查询，并行检索后合并，同时做意图识别过滤无关请求。
+**问题**：`RRFFusionStage` 原输出 `list[SearchHit]`，导致 `RerankStage` 拿不到 `query_text`，carrier 在此断裂。
+
+**修复**：`SearchContext` 新增 `ranked_hits` 字段，`RRFFusionStage` 填入后继续返回 `SearchContext`，保持 data carrier 贯穿全链路（见 ADR-036）。
 
 | 文件 | 改动 |
 |------|------|
-| `pipeline/stages/retrieval/query_rewrite_stage.py` | 接入 LLM，实现多 Query 扩展 + 意图识别 |
+| `domain/retrieval.py` | `RetrievalQuery` 加 `intent_is_valid`；`SearchContext` 加 `ranked_hits` |
+| `pipeline/core/context.py` | `TenantConfig` 加 `query_rewrite_enabled` / `rerank_provider` |
+| `pipeline/stages/retrieval/rrf_fusion_stage.py` | 输出改为 `SearchContext`，填 `ranked_hits` |
+
+### QueryRewriteStage 真实实现
+
+单次 LLM call，JSON 输出，同时完成两件事：
+1. **意图识别**：`is_knowledge_query` 写入 `query.intent_is_valid`；`False` 时 VectorSearch/KeywordSearch 跳过检索
+2. **Multi-Query 扩展**：生成 3 个语义变体写入 `query.expanded_queries`，VectorSearchStage 对每个变体分别检索后合并去重
+
+任何错误（LLM 超时、JSON 解析失败）自动降级为 passthrough。
+
+| 文件 | 改动 |
+|------|------|
+| `pipeline/stages/retrieval/query_rewrite_stage.py` | 接入 LLM，意图识别 + 多 Query 扩展 |
+| `pipeline/stages/retrieval/vector_search_stage.py` | `intent_is_valid=False` 时跳过 Milvus |
+| `pipeline/stages/retrieval/keyword_search_stage.py` | `intent_is_valid=False` 时跳过 ES |
 
 ### RerankStage 真实实现
 
-**当前**：直接透传 RRF 结果。
-**改为**：接入 BGE-Reranker（本地免费）或 Cohere Rerank，对 Top-20 精排后返回 Top-K。
+输入改为 `SearchContext`（terminal stage），内部从 PG 拉取 chunk 文本，调用 BGE-Reranker 精排，失败降级为 RRF 顺序。
 
 | 文件 | 改动 |
 |------|------|
-| `providers/base.py` | 新增 `RerankProvider` 抽象接口 |
-| `providers/rerank/bge_rerank.py` | BGE-Reranker 实现 |
-| `pipeline/stages/retrieval/rerank_stage.py` | 调用 RerankProvider 替换 pass-through |
+| `providers/rerank/bge_rerank.py` | BGE-Reranker-v2-m3，`FlagEmbedding` 懒加载 + `run_in_executor`（见 ADR-037）|
+| `pipeline/stages/retrieval/rerank_stage.py` | `SearchContext → list[SearchHit]`，调用 RerankProvider |
+| `main.py` | 注册 `bge_rerank` Provider |
+| `pyproject.toml` | 新增 `FlagEmbedding>=1.2` |
+
+### 调用链路（Phase 8）
+
+```
+GET /search?q=...
+  → RetrievalService.search()
+  → RAGOrchestrator.retrieve()
+      → HybridRetrievalStrategy.build_pipeline()
+      → QueryRewriteStage   → LLM（意图识别 + 3 变体扩展）
+      → VectorSearchStage   → Milvus ANN × N queries，合并去重
+      → KeywordSearchStage  → ES BM25
+      → RRFFusionStage      → RRF 融合，写入 ranked_hits，返回 SearchContext
+      → RerankStage         → PG 取文本 → BGE-Reranker 精排 → list[SearchHit]
+  → ChunkRepository.get_chunks_by_ids()
+  → 返回 { hits, chunks }
+```
 
 ---
 
