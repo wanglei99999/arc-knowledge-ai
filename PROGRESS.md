@@ -604,20 +604,33 @@ GET /search?q=...
 
 ---
 
-## Phase 9：测试补全 📋 设计中
+## Phase 9：测试补全 ✅
 
 **版本目标 v10.0**
 
-**目标**：补全 Phase 1–5 的零测试状态，覆盖核心业务路径。
+**目标**：补全核心模块的零测试状态，覆盖业务关键路径。
 
-| 模块 | 测试重点 |
-|------|---------|
-| Hook 系统 | TenantGuard / QuotaGuard 校验逻辑 |
-| ResilientLLMProvider | 重试次数、fallback 触发时机 |
-| RAGOrchestrator | 检索流程、Prompt 构建 |
-| 文档删除 | 四处存储联动清理 |
-| 会话持久化 | history 加载与写入 |
-| QueryRewrite / Rerank | Stage 输入输出契约 |
+### 已完成测试（共 70 个，含原有 21 个）
+
+| 文件 | 用例数 | 覆盖内容 |
+|------|--------|---------|
+| `tests/unit/pipeline/test_pipeline.py` | 9 | Pipeline 框架、Hook 执行、SubPipeline（Phase 0 原有）|
+| `tests/unit/stages/test_token_chunker.py` | 7 | Token 滑窗切片、overlap（Phase 0 原有）|
+| `tests/unit/stages/test_embed_stage.py` | 5 | EmbedStage 批量向量化（Phase 0 原有）|
+| `tests/unit/hooks/test_tenant_guard.py` | 11 | tenant_id 格式校验、边界值、空值检查 |
+| `tests/unit/hooks/test_quota_guard.py` | 8 | API 配额、存储配额、超限优先级 |
+| `tests/unit/providers/test_resilient_llm.py` | 7 | 重试次数、fallback 触发、stream 中途失败不回滚 |
+| `tests/unit/stages/test_query_rewrite_stage.py` | 8 | 意图识别、Multi-Query 扩展、LLM 失败降级、开关控制 |
+| `tests/unit/stages/test_rrf_fusion_stage.py` | 8 | 输出类型为 SearchContext、overlap 加分、top_k、rank 赋值 |
+| `tests/unit/stages/test_rerank_stage.py` | 7 | 精排重排、降级 RRF 顺序、provider 不可用、DB 失败降级 |
+
+### 未覆盖（需集成测试环境，留待后续）
+
+| 模块 | 原因 |
+|------|------|
+| RAGOrchestrator 端到端 | 依赖 Milvus / ES / PG |
+| 文档删除四存储联动 | 依赖 MinIO / Milvus / ES / PG |
+| 会话持久化 | 依赖 PG |
 
 ---
 
