@@ -210,6 +210,17 @@ CREATE TABLE IF NOT EXISTS memories (
 
 CREATE INDEX IF NOT EXISTS idx_memories_user
     ON memories (tenant_id, user_id, updated_at DESC);
+
+-- ── 租户 LLM 配置表 ──────────────────────────────────────────────────────────
+-- 每租户独立配置 LLM 引擎和模型，空字符串 = 使用 settings 全局默认值
+CREATE TABLE IF NOT EXISTS tenant_configs (
+    tenant_id            VARCHAR(64)   PRIMARY KEY,
+    default_llm_provider VARCHAR(64)   NOT NULL DEFAULT 'openai_llm',
+    default_llm_model    VARCHAR(128)  NOT NULL DEFAULT '',
+    allowed_models       JSONB         NOT NULL DEFAULT '[]',
+    created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
 """
 
 # ── P1 预留（下一阶段执行）───────────────────────────────────────────────────
@@ -229,7 +240,8 @@ async def migrate() -> None:
         await conn.execute(DDL)
         print("Migration completed successfully.")
         print("Tables created: spaces, documents, document_chunks,")
-        print("                sessions, messages, message_citations, memories")
+        print("                sessions, messages, message_citations, memories,")
+        print("                tenant_configs")
     finally:
         await conn.close()
 

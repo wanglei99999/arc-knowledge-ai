@@ -22,6 +22,7 @@ class ChatRequestBody(BaseModel):
     history: list[dict] = []
     top_k: int = 10
     score_threshold: float = 0.5
+    model: str | None = None        # 请求级模型覆盖，优先于租户配置
 
 
 async def _sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
@@ -59,6 +60,7 @@ async def chat(
         history=body.history,
         top_k=body.top_k,
         score_threshold=body.score_threshold,
+        model=body.model,
         llm_provider_name=settings.llm_fallback_provider or "openai_llm",
         embedding_provider_name="openai_embedding",
     )

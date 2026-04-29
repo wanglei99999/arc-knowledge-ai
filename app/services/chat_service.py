@@ -39,6 +39,7 @@ class ChatRequest:
     history: list[dict] = field(default_factory=list)   # 无 session 时的后备历史
     top_k: int = 10
     score_threshold: float = 0.5
+    model: str | None = None             # 请求级模型覆盖（优先于租户配置）
 
 
 class ChatService:
@@ -101,6 +102,7 @@ class ChatService:
                 tenant_id=req.tenant_id,
                 top_k=req.top_k,
                 score_threshold=req.score_threshold,
+                model=req.model,
             ),
         )
 
@@ -155,6 +157,7 @@ class ChatService:
             tenant_id=req.tenant_id,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
+            model=req.model,
         )
         history = [
             ChatMessage(role=m["role"], content=m["content"])
@@ -164,6 +167,7 @@ class ChatService:
             result=result,
             history=history,
             tenant_id=req.tenant_id,
+            model=req.model,
         ):
             yield token
 

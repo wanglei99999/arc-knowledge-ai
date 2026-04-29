@@ -28,12 +28,14 @@ class QuotaSnapshot:
 
 @dataclass
 class TenantConfig:
-    """租户级运行时配置（从 Nacos 加载）"""
+    """租户级运行时配置（从 DB / Nacos 加载）"""
     tenant_id: str
     ingestion_strategy: str = "standard"
     retrieval_strategy: str = "hybrid"
     embedding_provider: str = "openai_embedding"
     llm_provider: str = "openai_llm"
+    default_llm_model: str = ""          # 空字符串 = 使用 Provider 自己的 settings 默认值
+    allowed_models: list[str] = field(default_factory=list)  # 空列表 = 不限制
     chunk_size: int = 512
     chunk_overlap: int = 64
     top_k: int = 10

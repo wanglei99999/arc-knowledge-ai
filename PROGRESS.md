@@ -634,32 +634,72 @@ GET /search?q=...
 
 ---
 
-## Phase 10：多租户模型路由重构 📋 设计中
+## Phase 10：多租户模型路由重构 ✅
 
 **版本目标 v11.0**
 
-**目标**：修复 Phase 5 全局 model_state 局限，实现三层模型解析。
+**目标**：修复 Phase 5 全局 model_state 局限，实现三层模型解析，让每个租户独立配置 LLM 引擎和模型。
 
 > 📌 此 Phase 对应原"Phase 6 多租户模型路由"完整设计内容，详见 Phase 5 末尾的⚠️已知局限说明。
 
 ### 三层解析优先级
 
 ```
-请求级 model > TenantConfig.default_llm_model > settings.openai_llm_model
+请求级 model（/chat body 传入）
+  ↓ 未指定则用
+TenantConfig.default_llm_model（tenant_configs DB 加载）
+  ↓ 为空则用
+settings.openai_llm_model / settings.ollama_llm_model（全局兜底）
 ```
 
-### 新增 DB 表
+### 新增文件（3 个）
 
-| 表 | 核心字段 |
-|----|---------|
-| `tenant_configs` | `tenant_id`, `default_llm_provider`, `default_llm_model`, `allowed_models`(JSONB) |
+| 文件 | 说明 |
+|------|------|
+| `infrastructure/postgres/repositories/tenant_config_repo.py` | `TenantConfigRepository`：`get` / `upsert`，按 `tenant_id` PK 操作 |
+| `services/tenant_config_service.py` | `TenantConfigService`：`get_or_default`（无记录时 fallback 全默认）/ `update` |
+| `docs/adr/ADR-039-per-tenant-model-routing.md` | 废除全局模型状态的架构决策记录 |
 
-### 关键改动
+### 修改文件（7 个）
 
-- `providers/llm/model_state.py` — **删除**，全局状态移除
-- `providers/llm/model_hub.py` — 升级为三层解析器 + allowed_models 校验
-- `providers/llm/openai_llm.py` / `ollama_llm.py` — model 改为按调用传入
-- `api/routers/admin.py` — 全局 switch 接口替换为租户级配置管理
+| 文件 | 改动 |
+|------|------|
+| `pipeline/core/context.py` | `TenantConfig` 新增 `default_llm_model: str = ""`、`allowed_models: list[str] = []` |
+| `providers/llm/openai_llm.py` | `self._model` → `self._default_model`；新增 `_resolve_model(ctx)` 按调用解析模型 |
+| `providers/llm/ollama_llm.py` | 移除 `model_state` 依赖；新增 `_resolve_model(ctx)` |
+| `providers/llm/model_hub.py` | 新增 `allowed_models` 白名单校验，违规直接 `PermissionError` |
+| `workflows/rag_orchestrator.py` | 三个方法从 `TenantConfigService` 加载配置；新增可选 `model` 参数 |
+| `services/chat_service.py` | `ChatRequest` 新增 `model` 字段并透传 |
+| `api/routers/chat.py` | `ChatRequestBody` 新增可选 `model` 字段 |
+| `api/routers/admin.py` | 删全局 switch 接口；新增 `GET/PUT /admin/tenants/{tenant_id}/config` |
+| `scripts/migrate.py` | 新增 `tenant_configs` 表 DDL |
+
+### 删除文件（1 个）
+
+| 文件 | 原因 |
+|------|------|
+| `providers/llm/model_state.py` | 进程级全局状态，所有租户共享同一模型，多租户隔离漏洞 |
+
+### 已知局限
+
+- `memory/manager.py` 和 `memory/extractor.py` 的记忆提取 LLM 调用仍使用系统默认配置，未接入租户路由（属内部操作，可接受）
+- `tenant_configs` 每次 RAG 请求额外一次 PK 查询，后续可加 Redis 缓存
+
+### 调用链路（Phase 10）
+
+```
+POST /chat (body.model 可选)
+  → ChatService.stream_chat(req.model)
+  → RAGOrchestrator.retrieve/stream_generate(model=req.model)
+      → TenantConfigService.get_or_default(tenant_id)   ← DB 加载
+      → if model: replace(config, default_llm_model=model)  ← 请求级覆盖
+      → ModelHub.get_provider(ctx)
+          → allowed_models 校验
+          → OpenAILLMProvider / OllamaLLMProvider
+              → _resolve_model(ctx)  ← ctx.config.default_llm_model or settings 默认
+
+PUT /admin/tenants/{tenant_id}/config  ← 租户级配置 CRUD（替换原全局 switch）
+```
 
 ---
 

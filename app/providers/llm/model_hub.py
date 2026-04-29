@@ -21,6 +21,14 @@ class ModelHub:
         primary_id = ctx.config.llm_provider
         fallback_id = settings.llm_fallback_provider
 
+        # allowed_models 校验：非空列表 + 指定了模型时才拦截
+        model = ctx.config.default_llm_model
+        allowed = ctx.config.allowed_models
+        if allowed and model and model not in allowed:
+            raise PermissionError(
+                f"Model {model!r} is not in the allowed list for tenant {ctx.tenant_id!r}"
+            )
+
         primary: LLMProvider = registry.get_provider(primary_id)  # type: ignore[assignment]
 
         if primary_id == fallback_id:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.config.settings import settings
@@ -11,9 +12,11 @@ from app.infrastructure.milvus.client import reset_collection
 from app.infrastructure.milvus.memory_collection import reset_memory_collection
 from app.infrastructure.minio.client import empty_bucket
 from app.infrastructure.postgres.client import get_session
-from app.providers.llm.model_state import get_current_model, reset_model, set_current_model
+from app.services.tenant_config_service import TenantConfigService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+_tenant_config_svc = TenantConfigService()
 
 _PG_TABLES = (
     "message_citations",
@@ -31,14 +34,13 @@ async def dev_reset() -> dict:
     """
     一键清空所有存储（PostgreSQL / Milvus / Elasticsearch / MinIO）。
 
-    ⚠️  仅在 app_env=development 时可用，生产环境返回 403。
+    仅在 app_env=development 时可用，生产环境返回 403。
     """
     if settings.app_env != "development":
         raise HTTPException(status_code=403, detail="Only available in development environment")
 
     async def _reset_pg() -> int:
         async with get_session() as session:
-            # 按依赖顺序逐表 TRUNCATE，最终返回各表合计行数（截断前）
             total = 0
             for table in _PG_TABLES:
                 result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
@@ -67,32 +69,41 @@ async def dev_reset() -> dict:
     }
 
 
-@router.post("/models/switch")
-async def switch_ollama_model(model: str) -> dict:
+# ── 租户 LLM 配置管理 ─────────────────────────────────────────────────────────
+
+class TenantConfigBody(BaseModel):
+    default_llm_provider: str = "openai_llm"
+    default_llm_model: str = ""
+    allowed_models: list[str] = []
+
+
+@router.get("/tenants/{tenant_id}/config", summary="查询租户 LLM 配置")
+async def get_tenant_config(tenant_id: str) -> dict:
     """
-    热切换 Ollama 模型，无需重启服务。
-
-    切换后新的 LLM 请求立即使用新模型（registry 每次返回新实例，读取最新状态）。
-
-    Args:
-        model: Ollama 模型名称，例如 "llama3.2" / "mistral" / "qwen2.5"
+    查询指定租户的 LLM 配置。DB 中无记录时返回系统默认值。
     """
-    set_current_model(model)
-    return {"provider": "ollama_llm", "model": model, "status": "switched"}
-
-
-@router.delete("/models/switch")
-async def reset_ollama_model() -> dict:
-    """重置为 settings 默认模型。"""
-    reset_model()
-    return {"provider": "ollama_llm", "model": settings.ollama_llm_model, "status": "reset"}
-
-
-@router.get("/models/current")
-async def get_ollama_model() -> dict:
-    """查询当前生效的 Ollama 模型。"""
+    config = await _tenant_config_svc.get_or_default(tenant_id)
     return {
-        "provider": "ollama_llm",
-        "model": get_current_model(settings.ollama_llm_model),
-        "default": settings.ollama_llm_model,
+        "tenant_id": tenant_id,
+        "default_llm_provider": config.llm_provider,
+        "default_llm_model": config.default_llm_model,
+        "allowed_models": config.allowed_models,
     }
+
+
+@router.put("/tenants/{tenant_id}/config", summary="新建或更新租户 LLM 配置")
+async def update_tenant_config(tenant_id: str, body: TenantConfigBody) -> dict:
+    """
+    新建或更新租户 LLM 配置（upsert）。
+
+    - `default_llm_provider`：使用哪个引擎（openai_llm / ollama_llm）
+    - `default_llm_model`：具体模型名，空字符串表示使用引擎自己的 settings 默认值
+    - `allowed_models`：允许使用的模型白名单，空列表表示不限制
+    """
+    row = await _tenant_config_svc.update(
+        tenant_id=tenant_id,
+        default_llm_provider=body.default_llm_provider,
+        default_llm_model=body.default_llm_model,
+        allowed_models=body.allowed_models,
+    )
+    return {"status": "ok", "tenant_id": tenant_id, "config": row}

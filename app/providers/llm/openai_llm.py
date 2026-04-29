@@ -21,7 +21,11 @@ class OpenAILLMProvider(LLMProvider):
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
         )
-        self._model = settings.openai_llm_model
+        self._default_model = settings.openai_llm_model
+
+    def _resolve_model(self, ctx: ProcessingContext) -> str:
+        """三层优先级：ctx.config.default_llm_model > settings.openai_llm_model"""
+        return ctx.config.default_llm_model or self._default_model
 
     async def health_check(self) -> HealthStatus:
         try:
@@ -42,7 +46,7 @@ class OpenAILLMProvider(LLMProvider):
 
     def get_context_window(self) -> int:
         for prefix, size in self._CONTEXT_WINDOWS.items():
-            if self._model.startswith(prefix):
+            if self._default_model.startswith(prefix):
                 return size
         return 8_192  # 未知模型保守默认
 
@@ -53,7 +57,7 @@ class OpenAILLMProvider(LLMProvider):
         **kwargs,
     ) -> str:
         resp = await self._client.chat.completions.create(
-            model=self._model,
+            model=self._resolve_model(ctx),
             messages=[{"role": m.role, "content": m.content} for m in messages],
             **kwargs,
         )
@@ -66,7 +70,7 @@ class OpenAILLMProvider(LLMProvider):
         **kwargs,
     ) -> AsyncIterator[str]:
         stream = await self._client.chat.completions.create(
-            model=self._model,
+            model=self._resolve_model(ctx),
             messages=[{"role": m.role, "content": m.content} for m in messages],
             stream=True,
             **kwargs,
