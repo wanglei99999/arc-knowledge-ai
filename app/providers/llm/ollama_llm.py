@@ -22,9 +22,11 @@ class OllamaLLMProvider(LLMProvider):
 
     def __init__(self) -> None:
         self._base_url = settings.ollama_base_url.rstrip("/")
-        # 优先使用运行时热切换的模型，否则读 settings 默认值
-        from app.providers.llm.model_state import get_current_model
-        self._model = get_current_model(settings.ollama_llm_model)
+        self._default_model = settings.ollama_llm_model
+
+    def _resolve_model(self, ctx: ProcessingContext) -> str:
+        """三层优先级：ctx.config.default_llm_model > settings.ollama_llm_model"""
+        return ctx.config.default_llm_model or self._default_model
 
     async def health_check(self) -> HealthStatus:
         try:
@@ -47,7 +49,7 @@ class OllamaLLMProvider(LLMProvider):
             resp = await client.post(
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    self._model,
+                    "model":    self._resolve_model(ctx),
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
                     "stream":   False,
                 },
@@ -66,7 +68,7 @@ class OllamaLLMProvider(LLMProvider):
                 "POST",
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    self._model,
+                    "model":    self._resolve_model(ctx),
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
                     "stream":   True,
                 },

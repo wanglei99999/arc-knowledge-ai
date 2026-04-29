@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from typing import AsyncIterator
 
@@ -9,6 +10,7 @@ from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantCo
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
 from app.providers.llm.model_hub import model_hub
+from app.services.tenant_config_service import TenantConfigService
 
 # 系统 Prompt 模板
 _SYSTEM_PROMPT = """你是一个知识库问答助手。请根据以下检索到的文档片段回答用户问题。
@@ -40,6 +42,7 @@ class RAGOrchestrator:
 
     def __init__(self) -> None:
         self._chunk_repo = ChunkRepository()
+        self._tenant_config_svc = TenantConfigService()
 
     def _make_ctx(self, tenant_id: str, config: TenantConfig) -> ProcessingContext:
         return ProcessingContext.create(
@@ -59,9 +62,12 @@ class RAGOrchestrator:
         tenant_id: str,
         top_k: int = 10,
         score_threshold: float = 0.5,
+        model: str | None = None,
     ) -> RetrievalResult:
         """执行混合检索，返回带文本的检索结果。"""
-        config = TenantConfig(tenant_id=tenant_id)
+        config = await self._tenant_config_svc.get_or_default(tenant_id)
+        if model:
+            config = dataclasses.replace(config, default_llm_model=model)
         ctx = self._make_ctx(tenant_id, config)
 
         strategy = registry.get_strategy(config.retrieval_strategy)
@@ -91,9 +97,12 @@ class RAGOrchestrator:
         result: RetrievalResult,
         history: list[ChatMessage],
         tenant_id: str,
+        model: str | None = None,
     ) -> str:
         """非流式生成（用于测试 / 批处理）。"""
-        config = TenantConfig(tenant_id=tenant_id)
+        config = await self._tenant_config_svc.get_or_default(tenant_id)
+        if model:
+            config = dataclasses.replace(config, default_llm_model=model)
         ctx = self._make_ctx(tenant_id, config)
         messages = self._build_messages(result, history)
         provider = self._get_llm_provider(ctx)
@@ -104,9 +113,12 @@ class RAGOrchestrator:
         result: RetrievalResult,
         history: list[ChatMessage],
         tenant_id: str,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
         """流式生成，yield token，供 SSE 推送。"""
-        config = TenantConfig(tenant_id=tenant_id)
+        config = await self._tenant_config_svc.get_or_default(tenant_id)
+        if model:
+            config = dataclasses.replace(config, default_llm_model=model)
         ctx = self._make_ctx(tenant_id, config)
         messages = self._build_messages(result, history)
         provider = self._get_llm_provider(ctx)
