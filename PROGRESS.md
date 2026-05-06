@@ -703,15 +703,59 @@ PUT /admin/tenants/{tenant_id}/config  ← 租户级配置 CRUD（替换原全�
 
 ---
 
-## Phase 11：限流 + 语义缓存 📋 设计中
+## Phase 11a：限流中间件 ✅
 
 **版本目标 v12.0**
 
-**目标**：防滥用 + 降低重复 LLM 调用成本。
+**目标**：防滥用，按租户隔离请求频率，保护 LLM 调用成本。
 
-### Rate Limiting
+### 新增文件（2 个）
 
-- `api/middleware/rate_limit.py` — 基于 Redis 滑动窗口，按 `tenant_id` 限流（默认 60次/分钟）
+| 文件 | 说明 |
+|------|------|
+| `api/middleware/__init__.py` | middleware 包 |
+| `api/middleware/rate_limit.py` | 纯 ASGI 限流中间件：滑动窗口计数器，按 `tenant_id` 隔离，Redis 不可用时 fail open |
+
+### 修改文件（2 个）
+
+| 文件 | 改动 |
+|------|------|
+| `config/settings.py` | 新增 `rate_limit_enabled`（bool）、`rate_limit_per_minute`（默认 60） |
+| `main.py` | 注册 `RateLimitMiddleware`，位于 `CORSMiddleware` 内层 |
+
+### 算法：滑动窗口计数器
+
+```
+now_ts      = int(time.time())
+cur_bucket  = now_ts // 60          # 当前分钟桶
+elapsed     = now_ts % 60           # 当前分钟已过秒数
+
+cur_count   = INCR rate:{tenant_id}:{cur_bucket}
+prev_count  = GET  rate:{tenant_id}:{cur_bucket - 1}
+
+weight      = 1.0 - elapsed / 60.0  # 前一桶权重线性衰减
+estimated   = cur_count + prev_count × weight
+
+if estimated > limit → 429 Too Many Requests
+```
+
+### 响应头
+
+| 场景 | 响应头 |
+|------|-------|
+| 正常放行 | `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` |
+| 超限 | `HTTP 429` + `Retry-After: {剩余秒数}` |
+
+### 已知局限
+
+- 限额为全局统一值，尚不支持按租户差异化配额（后续可在 `TenantConfig` 扩展 `rate_limit_per_minute` 字段）
+- Sliding Window Counter 为近似算法，极端流量模式下误差 < 5%
+
+---
+
+## Phase 11b：语义缓存 📋 设计中
+
+**目标**：降低重复问题的 LLM 调用成本。
 
 ### 语义缓存
 
