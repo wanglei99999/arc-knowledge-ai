@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from app.api.middleware.rate_limit import RateLimitMiddleware
 from app.api.routers import admin, chat, document, search, session
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
@@ -64,8 +65,9 @@ app = FastAPI(
     docs_url="/docs" if settings.app_env != "production" else None,
 )
 
+app.add_middleware(RateLimitMiddleware)   # 内层：CORS 之后执行
 app.add_middleware(
-    CORSMiddleware,
+    CORSMiddleware,                        # 外层：最先执行，处理 OPTIONS 预检
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],

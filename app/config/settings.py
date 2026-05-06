@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     memory_update_threshold: float = 0.9           # >= 此相似度时更新而非新增
     ollama_context_window: int = 8192              # Ollama 模型上下文窗口大小
 
+    # ── Rate Limiting ─────────────────────────────────────────────────────────
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 60   # 每个租户每分钟最大请求数
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"
