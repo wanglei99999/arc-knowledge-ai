@@ -11,6 +11,7 @@ from app.infrastructure.elasticsearch.client import delete_by_document as es_del
 from app.infrastructure.minio.client import delete_file as minio_delete_file
 from app.infrastructure.milvus.client import delete_by_document as milvus_delete_by_document
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+from app.infrastructure.redis.semantic_cache import cache as _cache
 from app.workflows.ingestion_activities import IngestionInput
 from app.workflows.ingestion_workflow import IngestionWorkflow
 
@@ -136,5 +137,8 @@ class DocumentService:
 
         # 最后将 documents 记录逻辑删除
         await repo.update_document_status(document_id, tenant_id, DocumentStatus.DELETED)
+
+        # chunk_ids 已物理删除，清除该租户的语义缓存（避免 citations 引用断裂）
+        await _cache.invalidate(tenant_id)
 
         return DeleteResult(document_id=document_id)

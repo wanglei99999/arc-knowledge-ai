@@ -99,9 +99,9 @@ services:
       timeout: 10s
       retries: 5
 
-  # ── Redis ───────────────────────────────────────────────────────────────────
+  # ── Redis Stack（含向量搜索模块，用于语义缓存）──────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     ports:
       - "6379:6379"
     volumes:

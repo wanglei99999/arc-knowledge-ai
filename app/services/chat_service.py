@@ -10,7 +10,7 @@ from app.memory.extractor import MemoryExtractor
 from app.memory.manager import MemoryManager
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
-from app.providers.base import ChatMessage, LLMProvider
+from app.providers.base import LLMProvider
 from app.workflows.rag_orchestrator import RAGOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -152,25 +152,12 @@ class ChatService:
     # ── 原有简单流程（向后兼容，无 session）─────────────────────────────────
 
     async def _stream_simple(self, req: ChatRequest) -> AsyncIterator[str | list]:
-        result = await _orchestrator.retrieve(
-            query_text=req.query,
+        async for item in _orchestrator.chat(
+            query=req.query,
             tenant_id=req.tenant_id,
+            history=req.history,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
             model=req.model,
-        )
-        history = [
-            ChatMessage(role=m["role"], content=m["content"])
-            for m in req.history
-        ]
-        async for token in _orchestrator.stream_generate(
-            result=result,
-            history=history,
-            tenant_id=req.tenant_id,
-            model=req.model,
         ):
-            yield token
-
-        citations = self._build_citations(result)
-        if citations:
-            yield citations
+            yield item
