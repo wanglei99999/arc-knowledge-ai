@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 60   # 每个租户每分钟最大请求数
 
+    # ── Semantic Cache ────────────────────────────────────────────────────────
+    semantic_cache_enabled: bool = True
+    semantic_cache_threshold: float = 0.90          # 余弦相似度命中阈值
+    semantic_cache_ttl_seconds: int = 14400         # 4 小时基础 TTL
+    semantic_cache_embedding_provider: str = "openai_embedding"
+
     # ── Nacos（可选）──────────────────────────────────────────────────────────
     nacos_server: str = ""
     nacos_namespace: str = "dev"

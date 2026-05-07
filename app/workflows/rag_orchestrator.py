@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import uuid
 from typing import AsyncIterator
 
 from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+from app.infrastructure.redis.semantic_cache import cache as _cache
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
@@ -124,6 +126,77 @@ class RAGOrchestrator:
         provider = self._get_llm_provider(ctx)
         async for token in provider.stream_generate(ctx, messages):
             yield token
+
+    async def chat(
+        self,
+        query: str,
+        tenant_id: str,
+        history: list[dict],
+        top_k: int = 10,
+        score_threshold: float = 0.5,
+        model: str | None = None,
+    ) -> AsyncIterator[str | list]:
+        """
+        带语义缓存的流式问答门面。
+
+        history 为空（首轮）时走缓存路径；有历史记录时直接走 RAG，
+        避免多轮上下文污染缓存答案。
+        """
+        if not history:
+            cached = await _cache.get(query, tenant_id)
+            if cached:
+                yield cached.answer
+                if cached.citations:
+                    yield cached.citations
+                return
+
+        result = await self.retrieve(
+            query_text=query,
+            tenant_id=tenant_id,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            model=model,
+        )
+        history_messages = [
+            ChatMessage(role=m["role"], content=m["content"])
+            for m in history
+        ]
+
+        tokens: list[str] = []
+        async for token in self.stream_generate(
+            result=result,
+            history=history_messages,
+            tenant_id=tenant_id,
+            model=model,
+        ):
+            tokens.append(token)
+            yield token
+
+        citations = self._build_citations(result)
+        if citations:
+            yield citations
+
+        if not history:
+            asyncio.create_task(
+                _cache.set(query, "".join(tokens), citations, tenant_id)
+            )
+
+    @staticmethod
+    def _build_citations(result: RetrievalResult) -> list[dict]:
+        chunk_map = {c["chunk_id"]: c for c in result.chunks}
+        return [
+            {
+                "doc_id":      h.document_id,
+                "chunk_id":    h.chunk_id,
+                "doc_name":    chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
+                "chunk_index": h.chunk_index,
+                "content":     chunk_map.get(h.chunk_id, {}).get("content", ""),
+                "score":       round(h.score, 4),
+                "source":      h.source,
+            }
+            for h in result.hits
+            if h.chunk_id in chunk_map
+        ]
 
     def _build_messages(
         self,

@@ -753,14 +753,51 @@ if estimated > limit → 429 Too Many Requests
 
 ---
 
-## Phase 11b：语义缓存 📋 设计中
+## Phase 11b：语义缓存 ✅
 
-**目标**：降低重复问题的 LLM 调用成本。
+**版本目标 v13.0**
 
-### 语义缓存
+**目标**：降低重复问题的 LLM 调用成本，首轮语义相近问题跳过检索 + LLM。
 
-- 问题向量化 → 查 Redis（余弦相似度 > 0.95 命中）→ 直接返回，跳过检索 + LLM
-- `pipeline/hooks/` 新增 `semantic_cache_hook.py`，PRE_PIPELINE 查缓存，POST_PIPELINE 写缓存
+### 新增文件（1 个）
+
+| 文件 | 说明 |
+|------|------|
+| `infrastructure/redis/semantic_cache.py` | `SemanticCache`：两级缓存（精确 hash + 向量 KNN）、EmbeddingProvider 注入、异步写、Prometheus metrics |
+
+### 修改文件（6 个）
+
+| 文件 | 改动 |
+|------|------|
+| `infrastructure/redis/client.py` | 新增 `get_redis_binary()`（`decode_responses=False`） |
+| `config/settings.py` | 新增 4 个 `semantic_cache_*` 配置项 |
+| `workflows/rag_orchestrator.py` | 新增 `chat()` 门面方法 + `_build_citations()` 静态方法 |
+| `services/chat_service.py` | `_stream_simple()` 透传 `orchestrator.chat()`（3 行） |
+| `services/document_service.py` | `delete()` 触发 `cache.invalidate(tenant_id)` |
+| `main.py` | lifespan 调用 `cache.initialize()` |
+| `docker-compose.yml` | Redis 升级为 `redis/redis-stack-server:latest` |
+
+### 核心设计
+
+```
+RAGOrchestrator.chat()
+  ├─ history=[] → normalize → hash 精确匹配（O(1)）
+  │                         → embed → KNN 向量搜索（score ≥ 0.90 命中）
+  └─ history 非空 → 直接 RAG（多轮不走缓存）
+```
+
+### 失效策略
+
+| 操作 | 是否失效 |
+|------|---------|
+| 文档删除 | ✅（chunk_ids 断裂） |
+| 文档重传 | ✅（chunk_ids 全换） |
+| 新增文档 | ❌ |
+| 仅更新元数据 | ❌ |
+
+### 架构决策
+
+见 [ADR-041](docs/adr/ADR-041-semantic-cache-design.md)
 
 ---
 
