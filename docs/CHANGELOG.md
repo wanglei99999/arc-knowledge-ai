@@ -8,6 +8,39 @@
 
 ---
 
+## [ai-4.3.0] - 2026-05-08
+
+### Added
+
+**Phase 12：用量追踪**
+
+- `app/infrastructure/postgres/repositories/usage_repo.py`：`UsageRepository` — `record()` 写入 / `query_by_tenant()` 按租户时段汇总 / `get_today_spend()` 今日费用
+- `app/infrastructure/postgres/repositories/model_config_repo.py`：`ModelConfigRepository` — 模型单价 CRUD（`get` / `list_all` / `upsert` / `delete`）
+- `app/services/model_config_service.py`：`ModelConfigService` — 模型配置业务逻辑 + `get_cost()` 查单价
+- `app/services/usage_service.py`：`UsageService` — 用量查询业务逻辑 + `register_handlers()` 注册 EventBus 订阅者
+- `scripts/migrate.py`：新增 `model_configs` 表（模型单价）和 `usage_records` 表（用量流水，含 `cost_usd` 写时快照）
+- `app/infrastructure/telemetry/metrics.py`：新增 `arc_llm_tokens_total`（按 tenant/model/type）和 `arc_llm_cost_usd_total`（按 tenant/model）两个 Counter
+
+### Changed
+
+- `app/pipeline/core/events.py`：`DomainEvent.document_id` 改为可选（默认 `""`），支持非文档类事件（如 token 消耗）
+- `app/pipeline/core/context.py`：`QuotaSnapshot` 新增 `max_spend_per_day` / `used_spend_today` 字段，新增 `has_spend_quota()` 方法
+- `app/pipeline/hooks/quota_guard.py`：新增日费用限额检查；新增 `get_today_spend_cached()` — Redis 缓存（TTL 60s）+ DB 回填
+- `app/providers/llm/openai_llm.py`：`stream_generate()` 加 `stream_options={"include_usage": True}`，末尾 chunk 捕获 usage 并发布 `TOKEN_CONSUMED` 事件；`generate()` 同步捕获 `resp.usage`
+- `app/providers/llm/ollama_llm.py`：`stream_generate()` 从 `done=true` 末尾 chunk 捕获 `eval_count`；`generate()` 从响应体捕获 token 统计
+- `app/api/routers/admin.py`：新增模型配置接口（`GET/POST/DELETE /admin/models/{model_id}`）和用量查询接口（`GET /admin/tenants/{id}/usage`）
+- `app/main.py`：lifespan 调用 `register_handlers()` 注册 EventBus 订阅者
+
+### Architecture
+
+- 架构决策见 [ADR-042](adr/ADR-042-usage-tracking-design.md)
+- token 捕获通过 EventBus 发布 `TOKEN_CONSUMED` 事件，LLMProvider 接口零变动
+- `cost_usd` 写入时按当时单价快照，历史记录不受单价变动影响
+- 费用限额为最终一致性执行（Redis 缓存 1 分钟），高并发下可能小幅溢出
+- 当前实现为 Python MVP，Java 控制面 `arc-tenant` 就绪后接管计费与限额
+
+---
+
 ## [ai-4.2.0] - 2026-05-07
 
 ### Added

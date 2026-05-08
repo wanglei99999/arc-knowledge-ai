@@ -65,9 +65,11 @@ Stage 构造函数接受可选的 `provider` 参数用于测试注入；不传�
 - Activity 的输入/输出必须 JSON 可序列化（用 dataclass，不传 ProcessingContext）
 - `IngestionInput` 包含租户配置快照，保证同一文档的三个 Activity 使用一致配置
 
-### Hook 系统（当前未激活）
+### Hook 系统
 
-`StandardIngestionStrategy.hooks = []`，Phase 3 会填入 `[TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]`。Hook 通过 `priority` 整数控制执行顺序（数值越小越先执行）。现阶段不需要修改 Hook 相关代码。
+`StandardIngestionStrategy` 和 `OcrStrategy` 均已注册 `[TenantGuard, QuotaGuard, IdempotencyGuard, ObservabilityHook]`。Hook 通过 `priority` 整数控制执行顺序（数值越小越先执行）：TenantGuard=10、QuotaGuard=20、IdempotencyGuard=30、ObservabilityHook=100。
+
+PRE_PIPELINE 阶段依次执行：租户合法性校验 → API 调用次数 / 存储 / 日费用三项配额检查 → 幂等去重。
 
 ### RAG 检索架构（Phase 2）
 

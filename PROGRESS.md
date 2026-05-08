@@ -801,26 +801,43 @@ RAGOrchestrator.chat()
 
 ---
 
-## Phase 12：用量追踪 📋 设计中
+## Phase 12：用量追踪 ✅
 
 **版本目标 v13.0**
 
 **目标**：记录每次 LLM 调用的 token 消耗与费用，为配额管理和成本分析提供数据基础。
 
-> 📌 此 Phase 对应原"Phase 7 模型用量追踪"完整设计内容。
+### 新增文件（4 个）
 
-### 新增 DB 表
+| 文件 | 说明 |
+|------|------|
+| `infrastructure/postgres/repositories/usage_repo.py` | `record()` 写入 / `query_by_tenant()` 汇总 / `get_today_spend()` 今日费用 |
+| `infrastructure/postgres/repositories/model_config_repo.py` | 模型单价 CRUD（`get` / `list_all` / `upsert` / `delete`） |
+| `services/model_config_service.py` | 模型配置业务逻辑 + `get_cost()` 查单价 |
+| `services/usage_service.py` | EventBus 订阅者 + 用量查询业务逻辑 |
 
-| 表 | 核心字段 |
-|----|---------|
-| `model_configs` | `model_id`, `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window` |
-| `usage_records` | `tenant_id`, `model_id`, `input_tokens`, `output_tokens`, `cost_usd`, `created_at` |
+### 修改文件（7 个）
 
-### 关键改动
+| 文件 | 改动 |
+|------|------|
+| `scripts/migrate.py` | 新增 `model_configs` + `usage_records` 两张表 |
+| `pipeline/core/events.py` | `document_id` 改为可选，支持非文档类事件 |
+| `pipeline/core/context.py` | `QuotaSnapshot` 新增 `max_spend_per_day` / `used_spend_today` / `has_spend_quota()` |
+| `pipeline/hooks/quota_guard.py` | 新增费用限额检查；`get_today_spend_cached()` Redis 缓存（TTL 60s） |
+| `providers/llm/openai_llm.py` | `stream_generate()` 加 `stream_options`，末尾捕获 usage 发布 `TOKEN_CONSUMED` |
+| `providers/llm/ollama_llm.py` | `done=true` 末尾 chunk 捕获 token 统计，发布事件 |
+| `infrastructure/telemetry/metrics.py` | 新增 `arc_llm_tokens_total` / `arc_llm_cost_usd_total` |
+| `api/routers/admin.py` | 新增模型配置接口 + 用量查询接口 |
+| `main.py` | lifespan 调用 `register_handlers()` 注册订阅者 |
 
-- `pipeline/hooks/observability_hook.py` — POST_PIPELINE 解析 LLM usage，写 `usage_records`
-- `pipeline/core/context.py` — `QuotaSnapshot` 新增 `max_spend_per_day`、`used_spend_today`
-- 新增 `GET /admin/tenants/{id}/usage` 和 `GET /admin/models` 接口
+### 核心设计决策
+
+- **token 捕获**：通过 EventBus 发布 `TOKEN_CONSUMED` 事件，LLMProvider 接口零变动（见 ADR-042）
+- **费用计算**：写入时按当时单价快照到 `cost_usd`，历史记录不受单价变动影响
+- **限额执行**：最终一致性（Redis 缓存 1 分钟），接受小幅溢出，不引入分布式锁
+- **先建后拆**：当前在 Python 完整实现，Java 控制面 `arc-tenant` 就绪后接管
+
+见 [ADR-042](docs/adr/ADR-042-usage-tracking-design.md)
 
 ---
 

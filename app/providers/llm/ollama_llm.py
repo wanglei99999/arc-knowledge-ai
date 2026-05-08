@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import AsyncIterator
 
 import httpx
 
 from app.config.settings import settings
 from app.pipeline.core.context import ProcessingContext
+from app.pipeline.core.events import DomainEvent, EventType, event_bus
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, HealthStatus, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 @registry.provider("ollama_llm")
@@ -39,23 +43,50 @@ class OllamaLLMProvider(LLMProvider):
     def get_context_window(self) -> int:
         return settings.ollama_context_window
 
+    async def _publish_usage(
+        self,
+        ctx: ProcessingContext,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        try:
+            await event_bus.publish(DomainEvent(
+                type=EventType.TOKEN_CONSUMED,
+                tenant_id=ctx.tenant_id,
+                payload={
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            ))
+        except Exception as e:
+            logger.warning("Failed to publish TOKEN_CONSUMED event: %s", e)
+
     async def generate(
         self,
         ctx: ProcessingContext,
         messages: list[ChatMessage],
         **kwargs,
     ) -> str:
+        model = self._resolve_model(ctx)
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    self._resolve_model(ctx),
+                    "model":    model,
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
                     "stream":   False,
                 },
             )
             resp.raise_for_status()
-            return resp.json()["message"]["content"]
+            data = resp.json()
+            await self._publish_usage(
+                ctx, model,
+                data.get("prompt_eval_count", 0),
+                data.get("eval_count", 0),
+            )
+            return data["message"]["content"]
 
     async def stream_generate(
         self,
@@ -63,12 +94,13 @@ class OllamaLLMProvider(LLMProvider):
         messages: list[ChatMessage],
         **kwargs,
     ) -> AsyncIterator[str]:
+        model = self._resolve_model(ctx)
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
                 "POST",
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    self._resolve_model(ctx),
+                    "model":    model,
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
                     "stream":   True,
                 },
@@ -81,3 +113,10 @@ class OllamaLLMProvider(LLMProvider):
                     delta = data.get("message", {}).get("content", "")
                     if delta:
                         yield delta
+                    # 最后一个 chunk done=true，包含 token 统计
+                    if data.get("done"):
+                        await self._publish_usage(
+                            ctx, model,
+                            data.get("prompt_eval_count", 0),
+                            data.get("eval_count", 0),
+                        )

@@ -221,6 +221,31 @@ CREATE TABLE IF NOT EXISTS tenant_configs (
     created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+-- ── 模型单价配置表 ────────────────────────────────────────────────────────────
+-- 存储各 LLM 模型的 token 单价，写入 usage_records 时查询并快照到 cost_usd
+CREATE TABLE IF NOT EXISTS model_configs (
+    model_id           VARCHAR(128) PRIMARY KEY,
+    input_cost_per_1k  NUMERIC(10,6) NOT NULL DEFAULT 0,
+    output_cost_per_1k NUMERIC(10,6) NOT NULL DEFAULT 0,
+    context_window     INT          NOT NULL DEFAULT 0,
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- ── LLM 用量记录表 ────────────────────────────────────────────────────────────
+-- 每次 LLM 调用写入一条记录，cost_usd 在写入时按当时单价计算（历史快照）
+CREATE TABLE IF NOT EXISTS usage_records (
+    id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id     VARCHAR(64) NOT NULL,
+    model         VARCHAR(128) NOT NULL,
+    input_tokens  INT         NOT NULL DEFAULT 0,
+    output_tokens INT         NOT NULL DEFAULT 0,
+    cost_usd      NUMERIC(12,6) NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_tenant_time
+    ON usage_records (tenant_id, created_at DESC);
 """
 
 # ── P1 预留（下一阶段执行）───────────────────────────────────────────────────
