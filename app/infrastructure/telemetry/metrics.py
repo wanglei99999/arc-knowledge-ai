@@ -16,3 +16,17 @@ PIPELINE_TOTAL = Counter(
     "Total pipeline executions",
     ["status", "tenant_id"],
 )
+
+# LLM token 消耗总量，按租户 / 模型 / 方向（input | output）
+LLM_TOKENS_TOTAL = Counter(
+    "arc_llm_tokens_total",
+    "Total LLM tokens consumed",
+    ["tenant_id", "model", "type"],
+)
+
+# LLM 费用总量（美元），按租户 / 模型
+LLM_COST_USD_TOTAL = Counter(
+    "arc_llm_cost_usd_total",
+    "Total LLM cost in USD",
+    ["tenant_id", "model"],
+)

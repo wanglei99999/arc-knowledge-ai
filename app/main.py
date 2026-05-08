@@ -15,6 +15,7 @@ from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
 from app.infrastructure.redis.semantic_cache import cache as _semantic_cache
 from app.infrastructure.telemetry.otel import setup_tracing
+from app.services.usage_service import register_handlers as _register_usage_handlers
 
 
 def _register_components() -> None:
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         setup_tracing(settings.otel_service_name, settings.otlp_endpoint)
     # 启动：注册所有组件（必须在 semantic_cache.initialize 之前，registry 需要先就绪）
     _register_components()
+    _register_usage_handlers()
     await _semantic_cache.initialize()
     yield
     # 关闭：释放连接池

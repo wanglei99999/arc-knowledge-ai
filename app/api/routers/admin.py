@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -12,11 +13,15 @@ from app.infrastructure.milvus.client import reset_collection
 from app.infrastructure.milvus.memory_collection import reset_memory_collection
 from app.infrastructure.minio.client import empty_bucket
 from app.infrastructure.postgres.client import get_session
+from app.services.model_config_service import ModelConfigService
 from app.services.tenant_config_service import TenantConfigService
+from app.services.usage_service import UsageService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 _tenant_config_svc = TenantConfigService()
+_model_config_svc = ModelConfigService()
+_usage_svc = UsageService()
 
 _PG_TABLES = (
     "message_citations",
@@ -96,7 +101,7 @@ async def update_tenant_config(tenant_id: str, body: TenantConfigBody) -> dict:
     """
     新建或更新租户 LLM 配置（upsert）。
 
-    - `default_llm_provider`：使用哪个引擎（openai_llm / ollama_llm）
+    - `default_llm_provider`：使用哪个引擎（openai_llm / ollama_llama）
     - `default_llm_model`：具体模型名，空字符串表示使用引擎自己的 settings 默认值
     - `allowed_models`：允许使用的模型白名单，空列表表示不限制
     """
@@ -107,3 +112,48 @@ async def update_tenant_config(tenant_id: str, body: TenantConfigBody) -> dict:
         allowed_models=body.allowed_models,
     )
     return {"status": "ok", "tenant_id": tenant_id, "config": row}
+
+
+# ── 模型单价配置 ───────────────────────────────────────────────────────────────
+
+class ModelConfigBody(BaseModel):
+    input_cost_per_1k: float = 0.0
+    output_cost_per_1k: float = 0.0
+    context_window: int = 0
+
+
+@router.get("/models", summary="查询所有模型单价配置")
+async def list_model_configs() -> list[dict]:
+    return await _model_config_svc.list_all()
+
+
+@router.post("/models/{model_id}", summary="新增或更新模型单价配置")
+async def upsert_model_config(model_id: str, body: ModelConfigBody) -> dict:
+    return await _model_config_svc.upsert(
+        model_id=model_id,
+        input_cost_per_1k=body.input_cost_per_1k,
+        output_cost_per_1k=body.output_cost_per_1k,
+        context_window=body.context_window,
+    )
+
+
+@router.delete("/models/{model_id}", summary="删除模型单价配置")
+async def delete_model_config(model_id: str) -> dict:
+    deleted = await _model_config_svc.delete(model_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Model {model_id!r} not found")
+    return {"status": "ok", "model_id": model_id}
+
+
+# ── 用量查询 ──────────────────────────────────────────────────────────────────
+
+@router.get("/tenants/{tenant_id}/usage", summary="查询租户 LLM 用量")
+async def get_tenant_usage(
+    tenant_id: str,
+    start: date = Query(default=None),
+    end: date = Query(default=None),
+) -> dict:
+    today = date.today()
+    start = start or today.replace(day=1)  # 默认本月第一天
+    end = end or today
+    return await _usage_svc.query_by_tenant(tenant_id, start, end)

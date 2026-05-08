@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 from typing import AsyncIterator
 
 from openai import AsyncOpenAI
 
 from app.config.settings import settings
 from app.pipeline.core.context import ProcessingContext
+from app.pipeline.core.events import DomainEvent, EventType, event_bus
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, HealthStatus, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 @registry.provider("openai_llm")
@@ -50,17 +54,44 @@ class OpenAILLMProvider(LLMProvider):
                 return size
         return 8_192  # 未知模型保守默认
 
+    async def _publish_usage(
+        self,
+        ctx: ProcessingContext,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        try:
+            await event_bus.publish(DomainEvent(
+                type=EventType.TOKEN_CONSUMED,
+                tenant_id=ctx.tenant_id,
+                payload={
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            ))
+        except Exception as e:
+            logger.warning("Failed to publish TOKEN_CONSUMED event: %s", e)
+
     async def generate(
         self,
         ctx: ProcessingContext,
         messages: list[ChatMessage],
         **kwargs,
     ) -> str:
+        model = self._resolve_model(ctx)
         resp = await self._client.chat.completions.create(
-            model=self._resolve_model(ctx),
+            model=model,
             messages=[{"role": m.role, "content": m.content} for m in messages],
             **kwargs,
         )
+        if resp.usage:
+            await self._publish_usage(
+                ctx, model,
+                resp.usage.prompt_tokens,
+                resp.usage.completion_tokens,
+            )
         return resp.choices[0].message.content or ""
 
     async def stream_generate(
@@ -69,13 +100,21 @@ class OpenAILLMProvider(LLMProvider):
         messages: list[ChatMessage],
         **kwargs,
     ) -> AsyncIterator[str]:
+        model = self._resolve_model(ctx)
         stream = await self._client.chat.completions.create(
-            model=self._resolve_model(ctx),
+            model=model,
             messages=[{"role": m.role, "content": m.content} for m in messages],
             stream=True,
+            stream_options={"include_usage": True},
             **kwargs,
         )
         async for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+            elif chunk.usage:
+                # 最后一个 chunk 携带 usage，不 yield
+                await self._publish_usage(
+                    ctx, model,
+                    chunk.usage.prompt_tokens,
+                    chunk.usage.completion_tokens,
+                )

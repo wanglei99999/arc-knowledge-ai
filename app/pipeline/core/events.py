@@ -11,8 +11,8 @@ from typing import Any, Callable, Coroutine
 class DomainEvent:
     """领域事件基类"""
     type: str   #事件类型
-    tenant_id: str  #租户id 
-    document_id: str #文档id
+    tenant_id: str  #租户id
+    document_id: str = ""  #文档id，非文档类事件（如 token 消耗）可为空
     payload: dict[str, Any] = field(default_factory=dict)   #附加信息，比如耗时、错误原因、token数量
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())) #事件ID
     occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc)) #事件发生时间
