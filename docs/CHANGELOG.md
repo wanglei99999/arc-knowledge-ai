@@ -8,6 +8,37 @@
 
 ---
 
+## [ai-4.4.0] - 2026-05-08
+
+### Added
+
+**Phase 13：可观测性完善 + Admin UI**
+
+- `docker-compose.yml`：新增 Prometheus（9090）和 Grafana（3001）服务，volumes 持久化数据
+- `monitoring/prometheus/prometheus.yml`：Prometheus scrape 配置，抓取 FastAPI `/metrics` 端点
+- `monitoring/grafana/provisioning/`：Grafana 数据源 + Dashboard JSON provisioning（自动加载，无需手动导入）
+- `monitoring/grafana/provisioning/dashboards/arc-overview.json`：6 Panel 预置看板（Pipeline 成功率、Stage P95 延迟、LLM Token 速率、费用累计、语义缓存命中率、缓存命中/未命中速率）
+- `app/api/routers/admin.py`：`GET /admin/stats` — 系统聚合统计（文档数、切片数、会话数、存储字节）
+- `arc-knowledge-web/src/api/admin.ts`：Admin API 函数层（getAdminStats / getTenantUsage / listModelConfigs / upsertModelConfig / deleteModelConfig / getTenantConfig / updateTenantConfig）
+- `arc-knowledge-web/src/views/admin/index.vue`：Admin 管理页 — 真实统计卡片 + 7 天 Token 趋势图 + 模型定价 CRUD + 租户 LLM 配置表单
+
+### Changed
+
+- `app/infrastructure/postgres/repositories/usage_repo.py`：`query_by_tenant()` 新增 `group_by: str | None` 参数，`group_by="day"` 时追加 `by_day` 按天分组查询结果
+- `app/services/usage_service.py`：`query_by_tenant()` 透传 `group_by` 参数
+- `app/api/routers/admin.py`：`GET /admin/tenants/{id}/usage` 新增 `group_by` 查询参数，向后兼容
+- `arc-knowledge-web/src/router/index.ts`：新增 `/admin` 路由
+- `arc-knowledge-web/src/components/layout/AppSidebar.vue`：导航栏新增"管理配置"入口
+
+### Architecture
+
+- 架构决策见 [ADR-043](adr/ADR-043-prometheus-grafana-observability.md) — Prometheus + Grafana 选型
+- 架构决策见 [ADR-044](adr/ADR-044-mock-dashboard-and-real-admin-ui.md) — Demo Dashboard 保留 Mock，Admin 页承载真实数据
+- Grafana Dashboard JSON 纳入 Git（provisioning 模式），与代码同生命周期
+- Linux 环境下 prometheus.yml 需将 `host.docker.internal` 改为宿主 IP（Docker Desktop 专用）
+
+---
+
 ## [ai-4.3.0] - 2026-05-08
 
 ### Added
