@@ -41,9 +41,11 @@ class UsageRepository:
         tenant_id: str,
         start: date,
         end: date,
+        group_by: str | None = None,
     ) -> dict:
         start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
         end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
+        params = {"tenant_id": tenant_id, "start": start_dt, "end": end_dt}
 
         async with get_session() as session:
             # 汇总
@@ -57,7 +59,7 @@ class UsageRepository:
                     WHERE tenant_id = :tenant_id
                       AND created_at BETWEEN :start AND :end
                 """),
-                {"tenant_id": tenant_id, "start": start_dt, "end": end_dt},
+                params,
             )
             total = total_row.mappings().one()
 
@@ -75,16 +77,42 @@ class UsageRepository:
                     GROUP BY model
                     ORDER BY cost_usd DESC
                 """),
-                {"tenant_id": tenant_id, "start": start_dt, "end": end_dt},
+                params,
             )
             by_model = [dict(r) for r in model_rows.mappings()]
 
-        return {
+            # 按天分组（可选）
+            by_day: list[dict] = []
+            if group_by == "day":
+                day_rows = await session.execute(
+                    text("""
+                        SELECT
+                            DATE(created_at AT TIME ZONE 'UTC') AS day,
+                            COALESCE(SUM(input_tokens), 0)      AS input_tokens,
+                            COALESCE(SUM(output_tokens), 0)     AS output_tokens,
+                            COALESCE(SUM(cost_usd), 0)          AS cost_usd
+                        FROM usage_records
+                        WHERE tenant_id = :tenant_id
+                          AND created_at BETWEEN :start AND :end
+                        GROUP BY DATE(created_at AT TIME ZONE 'UTC')
+                        ORDER BY day ASC
+                    """),
+                    params,
+                )
+                by_day = [
+                    {**dict(r), "day": str(r["day"])}
+                    for r in day_rows.mappings()
+                ]
+
+        result: dict = {
             "total_input_tokens":  int(total["input_tokens"]),
             "total_output_tokens": int(total["output_tokens"]),
             "total_cost_usd":      float(total["cost_usd"]),
             "by_model":            by_model,
         }
+        if group_by == "day":
+            result["by_day"] = by_day
+        return result
 
     async def get_today_spend(self, tenant_id: str) -> float:
         today = datetime.now(timezone.utc).date()

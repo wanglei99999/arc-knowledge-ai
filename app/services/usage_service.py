@@ -61,8 +61,9 @@ class UsageService:
         tenant_id: str,
         start: date,
         end: date,
+        group_by: str | None = None,
     ) -> dict:
-        data = await self._repo.query_by_tenant(tenant_id, start, end)
+        data = await self._repo.query_by_tenant(tenant_id, start, end, group_by=group_by)
         return {
             "tenant_id": tenant_id,
             "period": {"start": str(start), "end": str(end)},

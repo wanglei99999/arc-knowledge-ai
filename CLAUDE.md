@@ -106,6 +106,29 @@ stage = EmbedStage(provider=FakeEmbeddingProvider())
 
 `pytest-asyncio` 已配置 `asyncio_mode = "auto"`，异步测试函数直接用 `async def` 即可，不需要 `@pytest.mark.asyncio`。
 
+### 可观测性基础设施（Phase 13）
+
+**Prometheus + Grafana** 通过 docker-compose 启动：
+
+```bash
+docker compose up -d prometheus grafana
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3001  (admin/admin)
+```
+
+- `monitoring/prometheus/prometheus.yml`：scrape `host.docker.internal:8000/metrics`（Linux 需改为宿主 IP）
+- `monitoring/grafana/provisioning/`：Grafana 自动加载数据源和 `arc-overview` 看板（6 Panel）
+- 看板 JSON 纳入 Git，修改后重启 Grafana 生效
+
+### Admin API（Phase 12-13）
+
+| 端点 | 说明 |
+|------|------|
+| `GET /admin/stats` | 系统聚合：文档数 / 切片数 / 会话数 / 存储字节（`deleted_at IS NULL`） |
+| `GET /admin/tenants/{id}/usage?group_by=day` | 用量查询，`group_by=day` 时返回 `by_day` 按天分组数组 |
+| `GET/PUT /admin/tenants/{id}/config` | 租户 LLM 配置（provider / model / allowed_models） |
+| `GET/POST/DELETE /admin/models/{model_id}` | 模型定价配置 CRUD |
+
 ## 扩展点
 
 | 场景 | 做法 |

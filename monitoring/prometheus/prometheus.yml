@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: arc-knowledge-ai
+    # host.docker.internal 在 Docker Desktop (Windows/Mac) 下指向宿主机
+    # Linux 环境下改为宿主机 IP 或将 FastAPI 也容器化后用服务名
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: /metrics

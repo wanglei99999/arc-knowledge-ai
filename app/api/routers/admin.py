@@ -152,8 +152,31 @@ async def get_tenant_usage(
     tenant_id: str,
     start: date = Query(default=None),
     end: date = Query(default=None),
+    group_by: str | None = Query(default=None),
 ) -> dict:
     today = date.today()
     start = start or today.replace(day=1)  # 默认本月第一天
     end = end or today
-    return await _usage_svc.query_by_tenant(tenant_id, start, end)
+    return await _usage_svc.query_by_tenant(tenant_id, start, end, group_by=group_by)
+
+
+# ── 系统聚合统计 ───────────────────────────────────────────────────────────────
+
+@router.get("/stats", summary="系统聚合统计")
+async def get_stats() -> dict:
+    async with get_session() as session:
+        doc_row = await session.execute(
+            text(
+                "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size), 0) AS storage "
+                "FROM documents WHERE deleted_at IS NULL"
+            )
+        )
+        chunk_row = await session.execute(text("SELECT COUNT(*) FROM document_chunks"))
+        session_row = await session.execute(text("SELECT COUNT(*) FROM sessions"))
+    doc = doc_row.mappings().one()
+    return {
+        "document_count": int(doc["cnt"]),
+        "chunk_count":    int(chunk_row.scalar_one()),
+        "session_count":  int(session_row.scalar_one()),
+        "storage_bytes":  int(doc["storage"]),
+    }
