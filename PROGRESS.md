@@ -841,7 +841,7 @@ RAGOrchestrator.chat()
 
 ---
 
-## Phase 13：可观测性完善 + Admin UI 📋 设计中
+## Phase 13：可观测性完善 + Admin UI ✅
 
 **版本目标 v14.0**
 
@@ -849,14 +849,18 @@ RAGOrchestrator.chat()
 
 ### 可观测性
 
-- Grafana 看板：Stage 耗时 / Pipeline 成功率 / LLM 延迟 / 用量趋势
-- Prometheus AlertRule：延迟 P95 > 3s / 错误率 > 5% / LLM 连续失败
+- [x] `docker-compose.yml`：新增 Prometheus（9090）+ Grafana（3001）服务
+- [x] `monitoring/prometheus/prometheus.yml`：scrape FastAPI `/metrics`，每 15s 抓取
+- [x] `monitoring/prometheus/alerting_rules.yml`：三条 AlertRule 占位（StageHighLatency / PipelineHighErrorRate / LLMCostHigh）
+- [x] `monitoring/grafana/provisioning/`：数据源 + Dashboard JSON 自动加载（provisioning 模式）
+- [x] `monitoring/grafana/provisioning/dashboards/arc-overview.json`：7 Panel 预置看板
 
-### 最小 Admin UI
+### Admin UI
 
-- 文档列表管理（上传 / 删除 / 状态）
-- 租户模型配置
-- 用量查看
+- [x] `GET /admin/stats`：系统聚合统计（文档数 / 切片数 / 会话数 / 存储字节）
+- [x] `GET /admin/tenants/{id}/usage?group_by=day`：按天分组用量查询
+- [x] `arc-knowledge-web/src/api/admin.ts`：Admin API 函数层
+- [x] `arc-knowledge-web/src/views/admin/index.vue`：真实统计卡片 + 7 天趋势图 + 模型定价 CRUD + 租户配置表单
 
 ---
 
