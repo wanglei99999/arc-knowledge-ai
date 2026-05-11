@@ -1,0 +1,37 @@
+groups:
+  - name: arc-knowledge-ai
+    rules:
+
+      # Stage P95 延迟持续超过 3 秒
+      - alert: StageHighLatency
+        expr: histogram_quantile(0.95, rate(arc_stage_duration_seconds_bucket[5m])) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stage {{ $labels.stage }} P95 延迟过高"
+          description: "当前 P95 延迟 {{ $value | humanizeDuration }}，超过 3s 阈值"
+
+      # Pipeline 错误率持续超过 5%
+      - alert: PipelineHighErrorRate
+        expr: >
+          rate(arc_pipeline_total{status="error"}[5m])
+          /
+          rate(arc_pipeline_total[5m])
+          > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pipeline 错误率过高"
+          description: "当前错误率 {{ $value | humanizePercentage }}，超过 5% 阈值"
+
+      # LLM 累计费用超过 $10
+      - alert: LLMCostHigh
+        expr: sum(arc_llm_cost_usd_total) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM 累计费用超过 $10"
+          description: "当前累计费用 ${{ $value }}"
