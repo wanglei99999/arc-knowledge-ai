@@ -8,6 +8,17 @@
 
 ---
 
+## [ai-4.4.1] - 2026-05-11
+
+### Added
+
+**Phase 13 补充：Prometheus AlertRule 占位**
+
+- `monitoring/prometheus/alerting_rules.yml`：三条告警规则（StageHighLatency / PipelineHighErrorRate / LLMCostHigh），`localhost:9090/alerts` 可见
+- `monitoring/prometheus/prometheus.yml`：新增 `rule_files` 引用 alerting_rules.yml
+
+---
+
 ## [ai-4.4.0] - 2026-05-08
 
 ### Added
