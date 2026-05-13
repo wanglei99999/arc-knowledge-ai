@@ -17,8 +17,8 @@ FIELD_TENANT_ID = "tenant_id"
 FIELD_CHUNK_INDEX = "chunk_index"
 FIELD_EMBEDDING = "embedding"
 
-# 默认向量维度（text-embedding-3-small）
-DEFAULT_DIM = 1536
+# 默认向量维度（text-embedding-v3 / text-embedding-v4 = 1024）
+DEFAULT_DIM = 1024
 
 
 def _get_client() -> MilvusClient:
@@ -114,7 +114,8 @@ async def reset_collection() -> int:
             stats = client.get_collection_stats(COLLECTION_NAME)
             count = int(stats.get("row_count", 0))
             client.drop_collection(COLLECTION_NAME)
-        _ensure_collection(client, DEFAULT_DIM)
+        # 不在此处预建表；首次 insert_vectors 会以实际 embedding 维度建表，
+        # 避免硬编码 DEFAULT_DIM 与当前 embedding 模型维度不一致。
         return count
 
     loop = asyncio.get_event_loop()

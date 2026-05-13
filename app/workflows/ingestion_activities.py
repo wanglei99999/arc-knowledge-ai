@@ -155,13 +155,21 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         Pipeline.start(registry.get_stage("embedder"))
         .then(registry.get_stage("milvus_indexer"))
     )
-    embedded_chunks: list[DocumentChunk] = await embed_pipeline.run(ctx, chunks)
 
-    repo = ChunkRepository()
-    await repo.save_chunks(embedded_chunks)
-    await repo.update_chunk_count(inp.document_id, inp.tenant_id, len(embedded_chunks))
-    await repo.update_document_status(
-        inp.document_id, inp.tenant_id, DocumentStatus.INDEXED
-    )
+    try:
+        embedded_chunks: list[DocumentChunk] = await embed_pipeline.run(ctx, chunks)
+
+        repo = ChunkRepository()
+        await repo.save_chunks(embedded_chunks)
+        await repo.update_chunk_count(inp.document_id, inp.tenant_id, len(embedded_chunks))
+        await repo.update_document_status(
+            inp.document_id, inp.tenant_id, DocumentStatus.INDEXED
+        )
+    except Exception as exc:
+        # gRPC（pymilvus）和其他底层库抛出的异常带有极深的 __cause__ 链，
+        # Temporal SDK 递归序列化该链时会撞上 Python 的 recursion limit，
+        # 导致真正的错误被 "Failed building exception result" 吞掉。
+        # 用 from None 截断链，保留错误类型和消息，让 Temporal 能正常上报。
+        raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
 
     return len(embedded_chunks)

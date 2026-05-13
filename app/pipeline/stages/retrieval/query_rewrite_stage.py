@@ -19,10 +19,10 @@ _REWRITE_PROMPT = """\
 2. 如果是有效的知识库查询，生成 3 个语义等价但表达不同的变体查询
 
 严格按以下 JSON 格式输出，不要包含任何其他内容：
-{
+{{
   "is_knowledge_query": true 或 false,
   "expanded_queries": ["变体1", "变体2", "变体3"]
-}
+}}
 
 若 is_knowledge_query 为 false，expanded_queries 返回空数组。
 
