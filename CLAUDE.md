@@ -137,3 +137,14 @@ docker compose up -d prometheus grafana
 | 新增 Stage | 新建文件，加 `@registry.stage("id")`，在 `main.py` import |
 | 新增处理方案 | 新建 Strategy 类，加 `@registry.strategy("id")`，在 `main.py` import |
 | 切换租户 Provider | 修改租户配置中的 `embedding_provider` / `parser_provider` 字段 |
+
+---
+
+## 文档位置规则（重要）
+
+ADR 和 CHANGELOG **不在本目录维护**，统一存放在父级 `knowledge_base/docs/`：
+
+- ADR → `knowledge_base/docs/adr/ADR-0XX-*.md`
+- CHANGELOG → `knowledge_base/docs/CHANGELOG.md`
+
+本目录内**禁止**创建 `docs/adr/` 或 `docs/CHANGELOG.md`。如误建，需迁移后删除。
