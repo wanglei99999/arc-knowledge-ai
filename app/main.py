@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -48,6 +49,11 @@ def _register_components() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Settings 已在模块导入时初始化完毕，此处设置不会被 Pydantic 校验。
+    # 总是注入 HF_ENDPOINT（镜像站），reranker_offline=True 时再锁定离线模式。
+    os.environ.setdefault("HF_ENDPOINT", settings.hf_endpoint)
+    if settings.reranker_offline:
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     # 启动：初始化 OTel tracing
     if settings.otel_enabled:
         setup_tracing(settings.otel_service_name, settings.otlp_endpoint)

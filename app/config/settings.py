@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 60   # 每个租户每分钟最大请求数
 
+    # ── HuggingFace / 本地模型 ────────────────────────────────────────────────
+    hf_endpoint: str = "https://hf-mirror.com"  # 镜像站（国内加速）
+    reranker_offline: bool = True               # True=只用本地缓存；False=允许联网下载
+
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True
     semantic_cache_threshold: float = 0.90          # 余弦相似度命中阈值
