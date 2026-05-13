@@ -6,7 +6,7 @@ from app.domain.retrieval import SearchContext, SearchHit
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.pipeline.core.stage import BaseStage
-from app.providers.base import RerankProvider
+from app.providers.base import HealthStatus, RerankProvider
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,10 @@ class RerankStage(BaseStage[SearchContext, list[SearchHit]]):
         provider = self._get_provider(ctx)
         if provider is None:
             logger.warning("RerankStage: provider %r not found, skipping rerank", ctx.config.rerank_provider)
+            return hits
+
+        if await provider.health_check() != HealthStatus.HEALTHY:
+            logger.debug("RerankStage: provider %r unavailable, using RRF order", ctx.config.rerank_provider)
             return hits
 
         try:

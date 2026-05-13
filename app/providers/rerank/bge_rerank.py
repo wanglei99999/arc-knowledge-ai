@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from functools import partial
 
 from app.pipeline.core.context import ProcessingContext
@@ -20,29 +21,44 @@ class BGERerankerProvider(RerankProvider):
 
     使用 FlagEmbedding 库的 FlagReranker，在 CPU/GPU 上运行 cross-encoder 推理。
     模型在首次调用时懒加载，后续复用同一实例。
-    推理在线程池中执行（run_in_executor），避免阻塞 asyncio 事件循环。
+    模型加载和推理均在线程池中执行（run_in_executor），避免阻塞 asyncio 事件循环。
     """
 
     provider_id = "bge_rerank"
 
     def __init__(self) -> None:
-        self._reranker = None  # 懒加载
+        self._reranker = None
+        self._lock = threading.Lock()
+        self._unavailable = False  # 首次加载失败后置 True，后续快速抛出不再重试
 
     def _load_reranker(self):
         if self._reranker is None:
-            try:
-                from FlagEmbedding import FlagReranker  # type: ignore[import]
-                self._reranker = FlagReranker(_MODEL_NAME, use_fp16=True)  #加载cross embedding模型 fp16是浮点数表示，用fp16可以加速
-                logger.info("BGERerankerProvider: model %s loaded", _MODEL_NAME)
-            except ImportError as e:
-                raise RuntimeError(
-                    "FlagEmbedding 未安装，请执行: pip install FlagEmbedding"
-                ) from e
+            with self._lock:
+                if self._reranker is None:
+                    try:
+                        from FlagEmbedding import FlagReranker  # type: ignore[import]
+                        self._reranker = FlagReranker(_MODEL_NAME, use_fp16=True)
+                        logger.info("BGERerankerProvider: model %s loaded", _MODEL_NAME)
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "FlagEmbedding 未安装，请执行: pip install FlagEmbedding"
+                        ) from e
+                    except Exception as e:
+                        self._unavailable = True
+                        logger.warning(
+                            "BGERerankerProvider: model %s not found locally, rerank will be "
+                            "skipped. Run `python scripts/download_bge_model.py` to download. "
+                            "Reason: %s",
+                            _MODEL_NAME, e,
+                        )
+                        raise
         return self._reranker
 
     async def health_check(self) -> HealthStatus:
+        if self._unavailable:
+            return HealthStatus.UNHEALTHY   # 快速路径，无额外开销
         try:
-            self._load_reranker()
+            await asyncio.get_event_loop().run_in_executor(None, self._load_reranker)
             return HealthStatus.HEALTHY
         except Exception:
             return HealthStatus.UNHEALTHY
@@ -63,12 +79,10 @@ class BGERerankerProvider(RerankProvider):
         if not documents:
             return []
 
-        reranker = self._load_reranker()
-        #构建输入对
-        pairs = [[query, doc] for doc in documents]
-        #异步执行推理，获取事件循环，执行线程调用
-        #partial 执行函数打包
         loop = asyncio.get_event_loop()
+        # 模型加载放进线程池，防止 HuggingFace 联网重试阻塞事件循环
+        reranker = await loop.run_in_executor(None, self._load_reranker)
+        pairs = [[query, doc] for doc in documents]
         scores: list[float] = await loop.run_in_executor(
             None,
             partial(reranker.compute_score, pairs, normalize=True),
