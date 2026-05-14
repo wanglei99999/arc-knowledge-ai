@@ -136,6 +136,25 @@ services:
     depends_on:
       - temporal
 
+  # ── Infinity 推理服务（BGE Reranker）────────────────────────────────────────
+  infinity:
+    image: michaelf34/infinity:latest
+    ports:
+      - "7997:7997"
+    volumes:
+      - ./models:/models
+    command: >
+      v2
+      --model-id /models/bge-reranker-v2-m3
+      --port 7997
+      --engine torch
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7997/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # ── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.52.0
