@@ -48,7 +48,7 @@ class TenantConfig:
     top_k: int = 10
     rerank_enabled: bool = True
     query_rewrite_enabled: bool = True
-    rerank_provider: str = "bge_rerank"
+    rerank_provider: str = "infinity_rerank"
 
 
 @dataclass

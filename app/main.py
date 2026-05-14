@@ -44,7 +44,8 @@ def _register_components() -> None:
     import app.pipeline.strategies.retrieval.hybrid_strategy  # noqa: F401
     import app.providers.llm.ollama_llm  # noqa: F401
     import app.providers.llm.openai_llm  # noqa: F401
-    import app.providers.rerank.bge_rerank  # noqa: F401
+    import app.providers.rerank.bge_rerank      # noqa: F401
+    import app.providers.rerank.infinity_rerank  # noqa: F401
 
 
 @asynccontextmanager

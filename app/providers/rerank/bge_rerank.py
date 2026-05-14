@@ -5,6 +5,7 @@ import logging
 import threading
 from functools import partial
 
+from app.config.settings import settings
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.providers.base import HealthStatus, RerankProvider
@@ -37,8 +38,9 @@ class BGERerankerProvider(RerankProvider):
                 if self._reranker is None:
                     try:
                         from FlagEmbedding import FlagReranker  # type: ignore[import]
-                        self._reranker = FlagReranker(_MODEL_NAME, use_fp16=True)
-                        logger.info("BGERerankerProvider: model %s loaded", _MODEL_NAME)
+                        model = settings.reranker_model_path or _MODEL_NAME
+                        self._reranker = FlagReranker(model, use_fp16=True)
+                        logger.info("BGERerankerProvider: model loaded from %s", model)
                     except ImportError as e:
                         raise RuntimeError(
                             "FlagEmbedding 未安装，请执行: pip install FlagEmbedding"

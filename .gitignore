@@ -36,3 +36,6 @@ Thumbs.db
 
 # dataset
 data/
+
+#models
+models/

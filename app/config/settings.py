@@ -86,9 +86,14 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 60   # 每个租户每分钟最大请求数
 
-    # ── HuggingFace / 本地模型 ────────────────────────────────────────────────
+    # ── HuggingFace / 本地模型（bge_rerank provider 专用）────────────────────
     hf_endpoint: str = "https://hf-mirror.com"  # 镜像站（国内加速）
     reranker_offline: bool = True               # True=只用本地缓存；False=允许联网下载
+    reranker_model_path: str = ""               # 留空则用 HuggingFace model id；填本地目录路径则直接加载
+
+    # ── Infinity 推理服务（infinity_rerank provider 专用）────────────────────
+    infinity_base_url: str = "http://localhost:7997"
+    infinity_rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True

@@ -577,19 +577,63 @@ GET /sessions/{id}/messages
 
 ### RerankStage 真实实现
 
-输入改为 `SearchContext`（terminal stage），内部从 PG 拉取 chunk 文本，调用 BGE-Reranker 精排，失败降级为 RRF 顺序。
+输入改为 `SearchContext`（terminal stage），内部从 PG 拉取 chunk 文本，调用 RerankProvider 精排，失败降级为 RRF 顺序。
 
 | 文件 | 改动 |
 |------|------|
-| `providers/rerank/bge_rerank.py` | BGE-Reranker-v2-m3，`FlagEmbedding` 懒加载 + `run_in_executor`（见 ADR-037）|
-| `pipeline/stages/retrieval/rerank_stage.py` | `SearchContext → list[SearchHit]`，调用 RerankProvider |
-| `main.py` | 注册 `bge_rerank` Provider |
+| `providers/rerank/bge_rerank.py` | BGE-Reranker-v2-m3，`FlagEmbedding` 懒加载 + `run_in_executor`，`_unavailable` 标志支持 O(1) 快速降级（见 ADR-037）|
+| `pipeline/stages/retrieval/rerank_stage.py` | `SearchContext → list[SearchHit]`，调用前先 `health_check()`，UNHEALTHY 时静默返回 RRF 顺序（见 ADR-047）|
+| `main.py` | 注册 `bge_rerank` / `infinity_rerank` Provider |
 | `pyproject.toml` | 新增 `FlagEmbedding>=1.2` |
 
-### 调用链路（Phase 8）
+### Infinity 独立推理服务（Phase 8 补充）
+
+`BGERerankProvider` 进程内加载违反 Provider 无状态设计（registry 每次返回新实例，模型权重无法共享）。将 BGE 模型迁移至 `infinity-emb` 独立推理服务，`InfinityRerankProvider` 退化为纯 HTTP 客户端，天然无状态。
+
+| 文件 | 改动 |
+|------|------|
+| `providers/rerank/infinity_rerank.py` | 新建：HTTP 调用 Infinity `POST /rerank`，`health_check()` 调 `GET /health` |
+| `config/settings.py` | 新增 `infinity_base_url`（默认 `http://localhost:7997`）/ `infinity_rerank_model` / `hf_endpoint` / `reranker_offline` / `reranker_model_path` |
+| `pipeline/core/context.py` | `TenantConfig.rerank_provider` 默认值改为 `"infinity_rerank"` |
+| `main.py` | `lifespan()` 条件注入 `HF_ENDPOINT` / `TRANSFORMERS_OFFLINE`；注册 `infinity_rerank` |
+| `docker-compose.yml` | 新增 `infinity` 服务定义（`michaelf34/infinity:latest`，可选 Docker 部署）|
+| `scripts/download_bge_model.py` | 新建：一次性下载 BGE 模型到本地路径 |
+| `models/bge-reranker-v2-m3/` | 模型文件目录（~1.1GB，不纳入 git）|
+
+**启动方式**：
+
+```bash
+# 安装 Infinity
+uv pip install "infinity-emb[torch]"
+
+# 启动推理服务（模型路径指向本地目录）
+infinity_emb v2 \
+  --model-id /path/to/models/bge-reranker-v2-m3 \
+  --port 7997 --engine torch
+```
+
+见 [ADR-048](../docs/adr/ADR-048-infinity-reranker-service.md)。
+
+### 检索调试端点（Phase 8 补充）
+
+新增 `POST /search/debug`，逐 Stage 手动执行检索链路，返回每阶段中间结果 + 耗时，用于检索效果调优。
+
+| 文件 | 改动 |
+|------|------|
+| `services/debug_retrieval_service.py` | 新建：手动依次调用各 Stage，记录耗时快照 |
+| `api/routers/search.py` | 新增 `POST /search/debug` 端点 |
+
+见 [ADR-046](../docs/adr/ADR-046-debug-retrieval-manual-stage-execution.md)。
+
+### 调用链路（Phase 8 完整版）
 
 ```
-GET /search?q=...
+POST /search/debug（调试）
+  → DebugRetrievalService.run()
+      → 逐 Stage 手动执行 + 记录耗时
+      → 返回 { vector_hits, keyword_hits, rrf_hits, final_hits, timings_ms }
+
+GET /search?q=...（生产）
   → RetrievalService.search()
   → RAGOrchestrator.retrieve()
       → HybridRetrievalStrategy.build_pipeline()
@@ -597,7 +641,8 @@ GET /search?q=...
       → VectorSearchStage   → Milvus ANN × N queries，合并去重
       → KeywordSearchStage  → ES BM25
       → RRFFusionStage      → RRF 融合，写入 ranked_hits，返回 SearchContext
-      → RerankStage         → PG 取文本 → BGE-Reranker 精排 → list[SearchHit]
+      → RerankStage         → health_check() → Infinity HTTP → BGE-Reranker 精排
+                              UNHEALTHY → 静默返回 RRF 顺序
   → ChunkRepository.get_chunks_by_ids()
   → 返回 { hits, chunks }
 ```
