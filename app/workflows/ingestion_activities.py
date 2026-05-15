@@ -149,11 +149,12 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         for d in chunk_dicts
     ]
 
-    # EmbedStage → MilvusIndexStage
+    # EmbedStage → MilvusIndexStage → ESIndexStage
     # Activity 3 只负责向量化和写库，不重跑解析/切片
     embed_pipeline = (
         Pipeline.start(registry.get_stage("embedder"))
         .then(registry.get_stage("milvus_indexer"))
+        .then(registry.get_stage("es_indexer"))
     )
 
     try:
