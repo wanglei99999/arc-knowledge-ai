@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.api.dependencies import UserContext, require_user
 from app.services.auth_service import AuthService, TokenPair
@@ -12,7 +12,7 @@ _service = AuthService()
 
 class RegisterBody(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length = 8)
 
 
 class LoginBody(BaseModel):
@@ -74,6 +74,6 @@ async def refresh(body: RefreshBody) -> dict:
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     body: LogoutBody,
-    _: UserContext = Depends(require_user),
+    ctx: UserContext = Depends(require_user),
 ) -> None:
-    await _service.logout(body.refresh_token)
+    await _service.logout(body.refresh_token,ctx.user_id)
