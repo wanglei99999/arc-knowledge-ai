@@ -38,6 +38,21 @@ from app.config.settings import settings
 #                      → memories
 
 DDL = """
+-- ── 用户表 ────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS users (
+    id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id        VARCHAR(64)  NOT NULL,
+    email            VARCHAR(255) NOT NULL,
+    hashed_password  VARCHAR(255) NOT NULL,
+    is_active        BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_users_tenant_email UNIQUE (tenant_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_tenant
+    ON users (tenant_id);
+
 -- ── 知识空间表 ───────────────────────────────────────────────────────────────
 -- 双标识：id（UUID，内部主键）+ space_key（可读标识，对接旧数据 'default'）
 -- space_key 在租户内唯一，不同租户可重名

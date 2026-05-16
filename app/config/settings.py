@@ -62,7 +62,9 @@ class Settings(BaseSettings):
     # ── JWT 认证 ──────────────────────────────────────────────────────────────
     jwt_secret: str = Field(default="change-me-in-production", repr=False)
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24   # 默认 24 小时
+    jwt_access_expire_minutes: int = 60  #access token默认1小时
+    jwt_refresh_expire_days: int = 7 #refresh token 7天
+
 
     # ── OpenTelemetry ─────────────────────────────────────────────────────────
     otel_enabled: bool = True
