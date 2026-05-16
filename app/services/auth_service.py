@@ -63,7 +63,7 @@ class AuthService:
     # 查用户，验密码；两个条件用 or 合并成一个错误信息，防止攻击者通过错误信息判断"邮箱存不存在"
     async def login(self,tenant_id:str,email:str,password:str)->TokenPair:
         user = await self._user_repo.find_by_email(tenant_id,email)
-        if not user or not self._verify_password(password,user.hashed_password):
+        if not user or not user.is_active or not self._verify_password(password,user.hashed_password):
             raise ValueError("Invalid email or password")
         access_token = self._issue_access_token(user)
         refresh_token = await self._issue_refresh_token(user)
@@ -79,7 +79,11 @@ class AuthService:
         user = User(user_id=user_id,tenant_id=tenant_id,email="",hashed_password="")
         return self._issue_access_token(user)
     
-    #直接删掉 Redis 里的 refresh token，之后再用这个 token 来 refresh 就会找不到，自然失效
-    async def logout(self,refresh_token:str)->None:
+    # 先验证 token 归属当前用户，再删除——防止持有有效 access token 的攻击者删掉他人的 refresh token
+    async def logout(self, refresh_token: str, user_id: str) -> None:
         redis = get_redis()
-        await redis.delete(f"refresh:{refresh_token}")
+        value = await redis.get(f"refresh:{refresh_token}")
+        if value:
+            stored_user_id, _ = value.split(":", 1)
+            if stored_user_id == user_id:
+                await redis.delete(f"refresh:{refresh_token}")
