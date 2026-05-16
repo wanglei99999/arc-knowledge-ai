@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.middleware.rate_limit import RateLimitMiddleware
-from app.api.routers import admin, chat, document, search, session
+from app.api.routers import admin, auth, chat, document, search, session
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
@@ -85,6 +85,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth.router)
 app.include_router(document.router)
 app.include_router(search.router)
 app.include_router(chat.router)
