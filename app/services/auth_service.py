@@ -42,7 +42,7 @@ class AuthService:
         }
         return jwt.encode(payload,settings.jwt_secret,algorithm = settings.jwt_algorithm)
     
-   #生成随机 UUID 存进 Redis，key 是 refresh:{uuid}，value 是 user_id:tenant_id，TTL =7天的秒数（86400 = 24×60×60）
+    #生成随机 UUID 存进 Redis，key 是 refresh:{uuid}，value 是 user_id:tenant_id，TTL =7天的秒数（86400 = 24×60×60）
     async def _issue_refresh_token(self,user:User)->str:
         token = str(uuid.uuid4())
         redis = get_redis()
