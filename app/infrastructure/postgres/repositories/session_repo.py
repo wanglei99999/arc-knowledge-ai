@@ -60,20 +60,21 @@ class SessionRepository:
         return _row_to_session(row) if row else None
 
     async def list(
-        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0
+        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0, space_id: str | None = None,
     ) -> list[Session]:
-        sql = text("""
+        where_extra = "AND space_id = :space_id" if space_id else ""
+        sql = text(f"""
             SELECT session_id, tenant_id, user_id, title, summary,
-                   message_count, created_at, updated_at
+                message_count, created_at, updated_at
             FROM sessions
-            WHERE tenant_id = :tenant_id AND user_id = :user_id
+            WHERE tenant_id = :tenant_id AND user_id = :user_id  {where_extra}
             ORDER BY updated_at DESC
             LIMIT :limit OFFSET :offset
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
                 "tenant_id": tenant_id, "user_id": user_id,
-                "limit": limit, "offset": offset,
+                "limit": limit, "offset": offset,"space_id":space_id,
             })
             rows = result.fetchall()
         return [_row_to_session(r) for r in rows]
@@ -82,8 +83,8 @@ class SessionRepository:
         sql = text("""
             DELETE FROM sessions
             WHERE session_id = :session_id
-              AND tenant_id  = :tenant_id
-              AND user_id    = :user_id
+            AND tenant_id  = :tenant_id
+            AND user_id    = :user_id
         """)
         async with get_db() as db:
             result = await db.execute(sql, {

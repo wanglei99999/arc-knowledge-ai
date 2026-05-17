@@ -55,11 +55,12 @@ async def create_session(
 async def list_sessions(
     limit: int = 20,
     offset: int = 0,
+    space_id: str | None = None,
     user: UserContext = Depends(require_user),
 ) -> list[SessionOut]:
     result = await _service.list(
         tenant_id=user.tenant_id, user_id=user.user_id,
-        limit=limit, offset=offset,
+        limit=limit, offset=offset, space_id=space_id,
     )
     return [
         SessionOut(

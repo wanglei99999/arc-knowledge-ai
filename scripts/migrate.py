@@ -261,6 +261,11 @@ CREATE TABLE IF NOT EXISTS usage_records (
 
 CREATE INDEX IF NOT EXISTS idx_usage_tenant_time
     ON usage_records (tenant_id, created_at DESC);
+
+-- ── 默认空间 seed ─────────────────────────────────────────────────────────────
+INSERT INTO spaces (tenant_id, space_key, name, status)
+VALUES ('default', 'default', '默认空间', 'active')
+ON CONFLICT (tenant_id, space_key) DO NOTHING;
 """
 
 # ── P1 预留（下一阶段执行）───────────────────────────────────────────────────

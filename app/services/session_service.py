@@ -35,9 +35,10 @@ class SessionService:
         return await self._session_repo.get_by_id(session_id, tenant_id, user_id)
 
     async def list(
-        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0
+        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0,
+        space_id: str | None = None,
     ) -> SessionListResult:
-        sessions = await self._session_repo.list(tenant_id, user_id, limit, offset)
+        sessions = await self._session_repo.list(tenant_id, user_id, limit, offset, space_id)
         return SessionListResult(sessions=sessions, total=len(sessions))
 
     async def delete(
