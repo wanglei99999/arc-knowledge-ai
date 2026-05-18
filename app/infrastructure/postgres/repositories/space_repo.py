@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from app.domain.space import Space
-from app.infrastructure.postgres.session import get_session
+from app.infrastructure.postgres.client import get_session
 
 
 def _slugify(name: str) -> str:

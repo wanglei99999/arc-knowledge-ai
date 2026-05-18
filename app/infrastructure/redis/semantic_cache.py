@@ -102,19 +102,20 @@ class SemanticCache:
             self._enabled, self._threshold, self._ttl,
         )
 
-    async def _ensure_index(self, tenant_id: str) -> None:
-        """为租户创建 HNSW 向量索引（幂等，进程内只创建一次）。"""
-        if tenant_id in _indexed_tenants:
+    async def _ensure_index(self, tenant_id: str, space_id: str = "default") -> None:
+        """为租户+空间创建 HNSW 向量索引（幂等，进程内只创建一次）。"""
+        cache_key = f"{tenant_id}:{space_id}"
+        if cache_key in _indexed_tenants:
             return
 
         dim = self._get_provider().get_dimension()
         redis = get_redis_binary()
-        index_name = f"idx:cache:{tenant_id}"
+        index_name = f"idx:cache:{tenant_id}:{space_id}"
         try:
             await redis.execute_command(
                 "FT.CREATE", index_name,
                 "ON", "HASH",
-                "PREFIX", "1", f"cache:vec:{tenant_id}:",
+                "PREFIX", "1", f"cache:vec:{tenant_id}:{space_id}:",
                 "SCHEMA",
                 "vector", "VECTOR", "HNSW", "10",
                 "TYPE", "FLOAT32",
@@ -129,9 +130,9 @@ class SemanticCache:
             # 并发首请求可能同时触发 FT.CREATE，后到的会报 "Index already exists"，属于正常竞态，忽略即可
             if "Index already exists" not in str(e):
                 raise
-        _indexed_tenants.add(tenant_id)
+        _indexed_tenants.add(cache_key)
 
-    async def get(self, query: str, tenant_id: str) -> CacheEntry | None:
+    async def get(self, query: str, tenant_id: str, space_id: str = "default") -> CacheEntry | None:
         if not self._enabled:
             return None
 
@@ -139,7 +140,7 @@ class SemanticCache:
         redis = get_redis_binary()
 
         # 第一层：精确匹配（O(1)，零 Embedding 消耗）
-        exact_key = f"cache:exact:{tenant_id}:{_md5(normalized)}"
+        exact_key = f"cache:exact:{tenant_id}:{space_id}:{_md5(normalized)}"
         raw = await redis.get(exact_key)
         if raw:
             try:
@@ -155,13 +156,13 @@ class SemanticCache:
 
         # 第二层：语义向量匹配
         try:
-            await self._ensure_index(tenant_id)
+            await self._ensure_index(tenant_id, space_id)
             provider = self._get_provider()
             embeddings = await provider.embed(_CACHE_CTX, [normalized])
             vec_bytes = _to_bytes(embeddings[0])
 
             result = await redis.execute_command(
-                "FT.SEARCH", f"idx:cache:{tenant_id}",
+                "FT.SEARCH", f"idx:cache:{tenant_id}:{space_id}",
                 "*=>[KNN 1 @vector $BLOB AS score]",
                 "PARAMS", "2", "BLOB", vec_bytes,
                 "RETURN", "3", "answer", "citations", "score",
@@ -206,6 +207,7 @@ class SemanticCache:
         answer: str,
         citations: list[dict],
         tenant_id: str,
+        space_id: str = "default",
     ) -> None:
         if not self._enabled:
             return
@@ -218,7 +220,7 @@ class SemanticCache:
             redis = get_redis_binary()
 
             # 写精确匹配缓存
-            exact_key = f"cache:exact:{tenant_id}:{_md5(normalized)}"
+            exact_key = f"cache:exact:{tenant_id}:{space_id}:{_md5(normalized)}"
             await redis.set(
                 exact_key,
                 json.dumps({"answer": answer, "citations": citations}),
@@ -226,13 +228,13 @@ class SemanticCache:
             )
 
             # 写向量缓存
-            await self._ensure_index(tenant_id)
+            await self._ensure_index(tenant_id, space_id)
             provider = self._get_provider()
             embeddings = await provider.embed(_CACHE_CTX, [normalized])
             vec_bytes = _to_bytes(embeddings[0])
 
             # 每条记录用独立 uuid key，避免不同问题的向量互相覆盖，保持 HNSW 索引多样性
-            vec_key = f"cache:vec:{tenant_id}:{uuid.uuid4()}"
+            vec_key = f"cache:vec:{tenant_id}:{space_id}:{uuid.uuid4()}"
             await redis.hset(vec_key, mapping={
                 b"vector":     vec_bytes,
                 b"answer":     answer.encode(),

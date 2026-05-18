@@ -62,6 +62,7 @@ class RAGOrchestrator:
         self,
         query_text: str,
         tenant_id: str,
+        space_id: str = "default",
         top_k: int = 10,
         score_threshold: float = 0.5,
         model: str | None = None,
@@ -78,6 +79,7 @@ class RAGOrchestrator:
         query = RetrievalQuery(
             query_text=query_text,
             tenant_id=tenant_id,
+            space_id=space_id,
             top_k=top_k,
             score_threshold=score_threshold,
         )
@@ -132,6 +134,7 @@ class RAGOrchestrator:
         query: str,
         tenant_id: str,
         history: list[dict],
+        space_id: str = "default",
         top_k: int = 10,
         score_threshold: float = 0.5,
         model: str | None = None,
@@ -143,7 +146,7 @@ class RAGOrchestrator:
         避免多轮上下文污染缓存答案。
         """
         if not history:
-            cached = await _cache.get(query, tenant_id)
+            cached = await _cache.get(query, tenant_id, space_id)
             if cached:
                 yield cached.answer
                 if cached.citations:
@@ -153,6 +156,7 @@ class RAGOrchestrator:
         result = await self.retrieve(
             query_text=query,
             tenant_id=tenant_id,
+            space_id=space_id,
             top_k=top_k,
             score_threshold=score_threshold,
             model=model,
@@ -178,7 +182,7 @@ class RAGOrchestrator:
 
         if not history:
             asyncio.create_task(
-                _cache.set(query, "".join(tokens), citations, tenant_id)
+                _cache.set(query, "".join(tokens), citations, tenant_id, space_id)
             )
 
     @staticmethod

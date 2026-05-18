@@ -78,11 +78,11 @@ CREATE INDEX IF NOT EXISTS idx_spaces_tenant
     ON spaces (tenant_id);
 
 -- ── 文档元数据表 ──────────────────────────────────────────────────────────────
--- space_id 暂保留 VARCHAR（与 space_key 对接），P0 Step-2 回填完成后改为 UUID FK
+-- space_id 使用 UUID FK，与 spaces.id 关联（见 ADR-035）
 CREATE TABLE IF NOT EXISTS documents (
     id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       VARCHAR(64)  NOT NULL,
-    space_id        VARCHAR(128) NOT NULL DEFAULT 'default',
+    space_id        UUID         NOT NULL REFERENCES spaces(id),
     original_name   VARCHAR(512) NOT NULL,
     mime_type       VARCHAR(128) NOT NULL,
     file_path       VARCHAR(1024) NOT NULL,  -- MinIO object key

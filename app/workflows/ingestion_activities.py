@@ -25,6 +25,7 @@ class IngestionInput:
     mime_type: str
     original_filename: str
     task_id: str
+    space_id: str = "default"
     # 租户配置快照（避免 Activity 执行期间配置变更导致不一致）
     ingestion_strategy: str = "standard"
     embedding_provider: str = "openai_embedding"
@@ -118,6 +119,7 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
             "chunk_id": c.chunk_id,
             "document_id": c.document_id,
             "tenant_id": c.tenant_id,
+            "space_id": inp.space_id,
             "content": c.content,
             "chunk_index": c.chunk_index,
             "token_count": c.token_count,
@@ -141,6 +143,7 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
             chunk_id=d["chunk_id"],
             document_id=d["document_id"],
             tenant_id=d["tenant_id"],
+            space_id=d["space_id"],
             content=d["content"],
             chunk_index=d["chunk_index"],
             token_count=d["token_count"],

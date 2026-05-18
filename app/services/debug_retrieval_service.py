@@ -35,6 +35,7 @@ _ANSWER_SYSTEM_PROMPT = """\
 
 class DebugSearchRequest(BaseModel):
     query: str
+    space_id: str = ''
     top_k: int = 10
     score_threshold: float = 0.5
     query_rewrite_enabled: bool = True
@@ -130,6 +131,7 @@ class DebugRetrievalService:
         base_query = RetrievalQuery(
             query_text=req.query,
             tenant_id=tenant_id,
+            space_id=req.space_id,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
         )
