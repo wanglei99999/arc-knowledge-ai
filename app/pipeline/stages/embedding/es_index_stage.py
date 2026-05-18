@@ -23,6 +23,7 @@ class ESIndexStage(BaseStage[list[DocumentChunk], list[DocumentChunk]]):
                 "chunk_id":    c.chunk_id,
                 "document_id": c.document_id,
                 "tenant_id":   c.tenant_id,
+                "space_id":    c.space_id,
                 "chunk_index": c.chunk_index,
                 "content":     c.content,
             }

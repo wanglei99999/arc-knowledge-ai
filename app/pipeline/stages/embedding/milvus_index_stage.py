@@ -35,6 +35,7 @@ class MilvusIndexStage(BaseStage[list[DocumentChunk], list[DocumentChunk]]):
                     chunk_id=chunk.chunk_id,
                     document_id=chunk.document_id,
                     tenant_id=chunk.tenant_id,
+                    space_id=chunk.space_id,
                     chunk_index=chunk.chunk_index,
                     embedding=chunk.embedding,
                 )

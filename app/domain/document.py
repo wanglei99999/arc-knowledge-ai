@@ -53,6 +53,7 @@ class DocumentChunk:
     tenant_id: str
     content: str
     chunk_index: int
+    space_id: str = "default"
     token_count: int = 0
     chunk_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     metadata: dict = field(default_factory=dict)

@@ -27,6 +27,7 @@ async def search(
     req = SearchRequest(
         query=q,
         tenant_id=tenant_id,
+        space_id=space_id,
         top_k=top_k,
         score_threshold=score_threshold,
     )

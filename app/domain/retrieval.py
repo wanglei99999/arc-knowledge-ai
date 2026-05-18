@@ -8,6 +8,7 @@ class RetrievalQuery:
     """检索请求，贯穿整条 Retrieval Pipeline"""
     query_text: str
     tenant_id: str
+    space_id: str = "default"
     top_k: int = 10
     score_threshold: float = 0.5
     # QueryRewriteStage 填充；为空时各 SearchStage 直接用 query_text
@@ -56,6 +57,13 @@ class RetrievalResult:
 
     @property
     def context_text(self) -> str:
-        """拼接 chunk 文本，用于 LLM prompt"""
-        ordered = sorted(self.chunks, key=lambda c: c.get("chunk_index", 0))
-        return "\n\n".join(c["content"] for c in ordered)
+        """按检索相关性排序（最高分在前）拼接 chunk 文本，含文档来源标签"""
+        chunk_map = {c["chunk_id"]: c for c in self.chunks}
+        parts: list[str] = []
+        for i, hit in enumerate(self.hits, 1):
+            chunk = chunk_map.get(hit.chunk_id)
+            if not chunk:
+                continue
+            doc_name = chunk.get("original_name") or hit.document_id
+            parts.append(f"[{i}] 来源：{doc_name}\n{chunk['content']}")
+        return "\n\n".join(parts)

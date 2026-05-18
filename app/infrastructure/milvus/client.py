@@ -14,6 +14,7 @@ COLLECTION_NAME = "arc_chunk_embeddings"
 FIELD_CHUNK_ID = "chunk_id"
 FIELD_DOCUMENT_ID = "document_id"
 FIELD_TENANT_ID = "tenant_id"
+FIELD_SPACE_ID = "space_id"
 FIELD_CHUNK_INDEX = "chunk_index"
 FIELD_EMBEDDING = "embedding"
 
@@ -36,6 +37,7 @@ def _ensure_collection(client: MilvusClient, dim: int) -> None:
     schema.add_field(FIELD_CHUNK_ID, DataType.VARCHAR, max_length=64, is_primary=True)
     schema.add_field(FIELD_DOCUMENT_ID, DataType.VARCHAR, max_length=64)
     schema.add_field(FIELD_TENANT_ID, DataType.VARCHAR, max_length=64, is_partition_key=True)
+    schema.add_field(FIELD_SPACE_ID, DataType.VARCHAR, max_length=128)
     schema.add_field(FIELD_CHUNK_INDEX, DataType.INT32)
     schema.add_field(FIELD_EMBEDDING, DataType.FLOAT_VECTOR, dim=dim)
 
@@ -59,6 +61,7 @@ class VectorRecord:
     chunk_id: str
     document_id: str
     tenant_id: str
+    space_id: str
     chunk_index: int
     embedding: list[float]
 
@@ -78,6 +81,7 @@ async def insert_vectors(records: list[VectorRecord]) -> None:
                 FIELD_CHUNK_ID: r.chunk_id,
                 FIELD_DOCUMENT_ID: r.document_id,
                 FIELD_TENANT_ID: r.tenant_id,
+                FIELD_SPACE_ID: r.space_id,
                 FIELD_CHUNK_INDEX: r.chunk_index,
                 FIELD_EMBEDDING: r.embedding,
             }
@@ -125,6 +129,7 @@ async def reset_collection() -> int:
 async def search_vectors(
     query_vector: list[float],
     tenant_id: str,
+    space_id: str,
     top_k: int = 10,
     score_threshold: float = 0.5,
 ) -> list[dict]:
@@ -139,7 +144,7 @@ async def search_vectors(
         results = client.search(
             collection_name=COLLECTION_NAME,
             data=[query_vector],
-            filter=f'{FIELD_TENANT_ID} == "{tenant_id}"',
+            filter=f'{FIELD_TENANT_ID} == "{tenant_id}" and {FIELD_SPACE_ID} == "{space_id}"',
             limit=top_k,
             output_fields=[FIELD_CHUNK_ID, FIELD_DOCUMENT_ID, FIELD_CHUNK_INDEX],
             search_params={"metric_type": "COSINE", "params": {"ef": 100}},

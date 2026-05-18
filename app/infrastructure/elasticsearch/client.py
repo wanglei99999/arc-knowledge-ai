@@ -14,6 +14,7 @@ _MAPPINGS = {
             "chunk_id":    {"type": "keyword"},
             "document_id": {"type": "keyword"},
             "tenant_id":   {"type": "keyword"},
+            "space_id":    {"type": "keyword"},
             "chunk_index": {"type": "integer"},
             "content":     {"type": "text", "analyzer": "standard"},
         }
@@ -65,6 +66,7 @@ async def index_chunks(chunks: list[dict]) -> None:
                     "chunk_id":    chunk["chunk_id"],
                     "document_id": chunk["document_id"],
                     "tenant_id":   chunk["tenant_id"],
+                    "space_id":    chunk["space_id"],
                     "chunk_index": chunk["chunk_index"],
                     "content":     chunk["content"],
                 },
@@ -77,6 +79,7 @@ async def index_chunks(chunks: list[dict]) -> None:
 async def bm25_search(
     query_text: str,
     tenant_id: str,
+    space_id: str,
     top_k: int = 10,
 ) -> list[dict]:
     """
@@ -92,7 +95,10 @@ async def bm25_search(
                     "query": {
                         "bool": {
                             "must":   {"match": {"content": query_text}},
-                            "filter": {"term": {"tenant_id": tenant_id}},
+                            "filter": [
+                            {"term": {"tenant_id": tenant_id}},
+                            {"term": {"space_id": space_id}},
+                        ],
                         }
                     },
                     "size": top_k,

@@ -12,6 +12,7 @@ _orchestrator = RAGOrchestrator()
 class SearchRequest:
     query: str
     tenant_id: str
+    space_id: str = "default"
     top_k: int = 10
     score_threshold: float = 0.5
 
@@ -31,6 +32,7 @@ class RetrievalService:
         result: RetrievalResult = await _orchestrator.retrieve(
             query_text=req.query,
             tenant_id=req.tenant_id,
+            space_id=req.space_id,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
         )

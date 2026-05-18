@@ -100,6 +100,7 @@ class ChatService:
             _orchestrator.retrieve(
                 query_text=req.query,
                 tenant_id=req.tenant_id,
+                space_id=req.space_id,
                 top_k=req.top_k,
                 score_threshold=req.score_threshold,
                 model=req.model,
@@ -156,6 +157,7 @@ class ChatService:
             query=req.query,
             tenant_id=req.tenant_id,
             history=req.history,
+            space_id=req.space_id,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
             model=req.model,

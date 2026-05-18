@@ -69,6 +69,7 @@ class DocumentService:
             mime_type=req.mime_type,
             original_filename=req.original_filename,
             task_id=task_id,
+            space_id=req.space_id,
             ingestion_strategy=req.ingestion_strategy,
             embedding_provider=req.embedding_provider,
             chunk_size=req.chunk_size,

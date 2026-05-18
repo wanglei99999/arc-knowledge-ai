@@ -909,7 +909,76 @@ RAGOrchestrator.chat()
 
 ---
 
-## Phase 14+：Java 控制面
+## Phase 14：知识空间基础功能 ✅
+
+**版本目标 v15.0**
+
+**目标**：让同一租户可以创建多个相互隔离的知识库（Knowledge Space），文档上传、AI 问答、会话历史均按空间独立管理，前端侧边栏全局切换。
+
+### 架构设计
+
+空间是**租户级共享资源**，同租户所有用户可见，无需独立权限层（见 ADR-051）。
+
+**双标识设计**：
+
+| 字段 | 类型 | 用途 |
+|------|------|------|
+| `id` | UUID PK | 内部主键，`sessions.space_id` FK |
+| `space_key` | VARCHAR(128) | URL 友好字符串，`documents.space_id` VARCHAR 存储 |
+
+### 后端新增文件（4 个）
+
+| 文件 | 说明 |
+|------|------|
+| `app/domain/space.py` | `Space` dataclass |
+| `app/infrastructure/postgres/repositories/space_repo.py` | `SpaceRepository`：`list_by_tenant` / `find_by_key` / `create`（自动 slugify）/ `ensure_default` |
+| `app/services/space_service.py` | `SpaceService`：`list_spaces` / `create_space` |
+| `app/api/routers/spaces.py` | `GET /spaces`、`POST /spaces` |
+
+### 后端修改文件（4 个）
+
+| 文件 | 改动 |
+|------|------|
+| `app/main.py` | 注册 `spaces` router |
+| `app/infrastructure/postgres/repositories/session_repo.py` | `list()` 新增可选 `space_id` 过滤（动态 WHERE 拼接） |
+| `app/services/session_service.py` | `list()` 透传 `space_id` |
+| `app/api/routers/session.py` | `GET /sessions` 新增 `space_id` 查询参数 |
+| `scripts/migrate.py` | 追加 `('default', 'default', '默认空间')` seed（幂等） |
+
+### 前端新增文件（3 个）
+
+| 文件 | 说明 |
+|------|------|
+| `src/types/space.ts` | `SpaceVO` 接口（`space_id` / `space_key` / `name` / `status`） |
+| `src/api/spaces.ts` | `listSpaces()` / `createSpace()` API 封装 |
+| `src/stores/spaces.ts` | Pinia spaces store：`currentSpace` 响应式、`currentSpaceKey` localStorage 持久化 |
+
+### 前端修改文件（5 个）
+
+| 文件 | 改动 |
+|------|------|
+| `src/components/layout/AppSidebar.vue` | Logo 下方插入空间切换器（下拉选择 + 内联新建） |
+| `src/components/layout/AppLayout.vue` | `onMounted` 调用 `fetchSpaces()` 初始化 |
+| `src/views/document/index.vue` | `'default'` → `currentSpace.space_key`；切换空间时 `watch` 重载文档列表 |
+| `src/views/search/index.vue` | `'default'` → `currentSpace.space_key` |
+| `src/utils/sse.ts` | Chat SSE `space_id` 改为 `currentSpace.space_key` |
+| `src/api/chat.ts` | `listSessions(spaceId?)` / `createSession(title, spaceId?)` 增加 space 参数 |
+| `src/stores/chat.ts` | `fetchSessions` / `newSession` 传入 `currentSpace.id`（UUID）；切换空间时自动重载会话列表 |
+
+### 前端字段使用规则
+
+| 操作 | 使用字段 | 原因 |
+|------|---------|------|
+| 文档上传 / 列表 / 检索 / Chat SSE | `space_key`（字符串） | `documents.space_id` 为 VARCHAR |
+| 创建会话 / 过滤会话列表 | `id`（UUID） | `sessions.space_id` 为 UUID FK |
+
+### 架构决策
+
+见 [ADR-051](../docs/adr/ADR-051-knowledge-space-design.md)
+
+---
+
+## Phase 15+：Java 控制面
 
 **条件**：Python MVP 稳定、有真实多用户接入需求时启动。
 

@@ -47,6 +47,7 @@ class VectorSearchStage(BaseStage[SearchContext, SearchContext]):
             raw_hits = await search_vectors(
                 query_vector=vectors[0],
                 tenant_id=query.tenant_id,
+                space_id=query.space_id,
                 top_k=query.top_k,
                 score_threshold=query.score_threshold,
             )

@@ -49,10 +49,18 @@ class OpenAILLMProvider(LLMProvider):
     }
 
     def get_context_window(self) -> int:
+        model = self._default_model.lower()
         for prefix, size in self._CONTEXT_WINDOWS.items():
-            if self._default_model.startswith(prefix):
+            if model.startswith(prefix):
                 return size
-        return 8_192  # 未知模型保守默认
+        # 从模型名猜测 context window 大小
+        if "128k" in model:
+            return 128_000
+        if "32k" in model:
+            return 32_000
+        if "16k" in model:
+            return 16_385
+        return 32_000  # 现代模型通用保守下限（替代原来的 8192）
 
     async def _publish_usage(
         self,
