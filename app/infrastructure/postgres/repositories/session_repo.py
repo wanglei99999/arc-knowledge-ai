@@ -151,12 +151,11 @@ class SessionRepository:
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
-              AND user_id    = :user_id
             ORDER BY created_at ASC
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id, "user_id": user_id
+                "session_id": session_id, "tenant_id": tenant_id,
             })
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
@@ -171,14 +170,12 @@ class SessionRepository:
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
-              AND user_id    = :user_id
             ORDER BY created_at ASC
             LIMIT :n
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id,
-                "user_id": user_id, "n": n,
+                "session_id": session_id, "tenant_id": tenant_id, "n": n,
             })
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
@@ -193,14 +190,12 @@ class SessionRepository:
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
-              AND user_id    = :user_id
             ORDER BY created_at DESC
             LIMIT :n
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id,
-                "user_id": user_id, "n": n,
+                "session_id": session_id, "tenant_id": tenant_id, "n": n,
             })
             rows = result.fetchall()
         # DESC 取出后反转为正序
@@ -221,7 +216,6 @@ class SessionRepository:
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
-              AND user_id    = :user_id
             ORDER BY created_at ASC
             OFFSET :skip_first
         """)
@@ -229,7 +223,6 @@ class SessionRepository:
             result = await db.execute(sql, {
                 "session_id":  session_id,
                 "tenant_id":   tenant_id,
-                "user_id":     user_id,
                 "skip_first":  skip_first,
             })
             rows = result.fetchall()

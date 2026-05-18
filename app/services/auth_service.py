@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 
 from app.config.settings import settings
 from app.domain.user import User
+from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
 from app.infrastructure.postgres.repositories.user_repo import UserRepository
 from app.infrastructure.redis.client import get_redis
 
@@ -23,6 +24,7 @@ class TokenPair:
 class AuthService:
     def __init__(self)->None:
         self._user_repo = UserRepository()
+        self._space_repo = SpaceRepository()
 
     #把明文密码交给 bcrypt 加密，返回哈希字符串，存数据库
     def _hash_password(self,password:str)->str:
@@ -58,7 +60,9 @@ class AuthService:
         user = User(tenant_id=tenant_id,
                     email=email,
                     hashed_password=self._hash_password(password))
-        return await self._user_repo.create(user)
+        created = await self._user_repo.create(user)
+        await self._space_repo.ensure_default(tenant_id)
+        return created
     
     # 查用户，验密码；两个条件用 or 合并成一个错误信息，防止攻击者通过错误信息判断"邮箱存不存在"
     async def login(self,tenant_id:str,email:str,password:str)->TokenPair:
