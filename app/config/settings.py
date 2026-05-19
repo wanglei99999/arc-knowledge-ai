@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", repr=False)
     openai_embedding_model: str = "text-embedding-3-small"
     openai_llm_model: str = "gpt-4o-mini"
+    openai_embedding_batch_size: int = 10  # API 单次最大 batch 数，官方 OpenAI 支持 2048
 
     # ── Ollama（本地 LLM）────────────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
@@ -96,6 +97,9 @@ class Settings(BaseSettings):
     # ── Infinity 推理服务（infinity_rerank provider 专用）────────────────────
     infinity_base_url: str = "http://localhost:7997"
     infinity_rerank_model: str = "BAAI/bge-reranker-v2-m3"
+
+    # ── OCR 服务（paddleocr_parser provider 专用）─────────────────────────────
+    ocr_service_url: str = "http://localhost:7998"
 
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True
