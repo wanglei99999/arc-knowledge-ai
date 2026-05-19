@@ -31,7 +31,7 @@ class IngestionInput:
     embedding_provider: str = "openai_embedding"
     chunk_size: int = 512
     chunk_overlap: int = 64
-
+    parser_provider: str = "smart_parser"
 
 def _make_context(inp: IngestionInput) -> ProcessingContext:
     """从 Activity 输入构造 ProcessingContext"""
@@ -92,6 +92,21 @@ async def parse_activity(inp: IngestionInput) -> dict:
         parser_stage = registry.get_stage("parser")
         parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
         activity.heartbeat("parsed")
+
+        #空文本 Guard
+        if not parsed.text.strip():
+            repo = ChunkRepository()
+            await repo.update_document_status(
+                inp.document_id,
+                inp.tenant_id,
+                DocumentStatus.FAILED,
+                error_message="文档解析结果为空，可能为损坏文件或不支持的扫描格式",
+            )
+            from temporalio.exceptions import ApplicationError
+            raise ApplicationError(
+                "empty parse result",
+                non_retryable=True,   # 不重试，直接终止 Workflow
+            )
 
     finally:
         os.unlink(tmp.name)

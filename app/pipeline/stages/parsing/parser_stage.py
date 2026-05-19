@@ -27,7 +27,7 @@ class ParserStage(BaseStage[RawFile, ParsedDocument]):
         if self._provider is not None:
             return self._provider
         # 从租户配置读 provider_id，默认 unstructured_parser
-        provider_id = getattr(ctx.config, "parser_provider", "unstructured_parser")
+        provider_id = getattr(ctx.config, "parser_provider", "smart_parser")
         return registry.get_provider(provider_id)  # type: ignore[return-value]
 
     async def _execute(

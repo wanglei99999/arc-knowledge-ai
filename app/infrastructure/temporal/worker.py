@@ -20,9 +20,14 @@ async def run_worker() -> None:
     # 触发所有 Stage/Provider/Strategy 注册
     import app.pipeline.stages.chunking.token_chunker  # noqa: F401
     import app.pipeline.stages.embedding.embed_stage  # noqa: F401
+    import app.pipeline.stages.embedding.es_index_stage  # noqa: F401
+    import app.pipeline.stages.embedding.milvus_index_stage  # noqa: F401
     import app.pipeline.stages.parsing.parser_stage  # noqa: F401
+    import app.pipeline.strategies.ingestion.ocr_strategy  # noqa: F401
     import app.pipeline.strategies.ingestion.standard_strategy  # noqa: F401
     import app.providers.embedding.openai_embedding  # noqa: F401
+    import app.providers.parser.paddleocr_provider  # noqa: F401
+    import app.providers.parser.smart_parser_provider  # noqa: F401
     import app.providers.parser.unstructured_provider  # noqa: F401
 
     client = await Client.connect(settings.temporal_host)

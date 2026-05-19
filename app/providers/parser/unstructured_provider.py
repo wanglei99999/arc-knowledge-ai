@@ -42,7 +42,7 @@ class UnstructuredParserProvider(ParserProvider):
     def _parse_sync(self, file_path: str) -> ParsedDocument:
         from unstructured.partition.auto import partition  # 懒加载，避免启动时开销
 
-        elements = partition(filename=file_path)
+        elements = partition(filename=file_path, strategy="fast")
 
         # 提取标题
         title: str | None = None

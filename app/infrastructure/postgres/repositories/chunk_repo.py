@@ -117,22 +117,33 @@ class ChunkRepository:
         document_id: str,
         tenant_id: str,
         status: DocumentStatus,
+        error_message: str | None = None,
     ) -> None:
         deleted_at_clause = ", deleted_at = NOW()" if status == DocumentStatus.DELETED else ""
+        error_clause = ", error_message = :error_message" if error_message is not None else ""
+
         sql = text(f"""
             UPDATE documents
-            SET status     = :status,
+            SET status = :status,
                 updated_at = NOW()
                 {deleted_at_clause}
-            WHERE id        = :document_id
-              AND tenant_id = :tenant_id
+                {error_clause}
+            WHERE id = :document_id
+            AND tenant_id = :tenant_id
         """)
+
+        params: dict = {
+            "status": status.value,
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+        }
+
+        if error_message is not None:
+            params["error_message"] = error_message
+
         async with get_session() as session:
-            await session.execute(sql, {
-                "status": status.value,
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            await session.execute(sql, params)
+
 
     async def get_chunks_by_ids(
         self,

@@ -46,13 +46,17 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         if not texts:
             return []
 
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-        )
-        # 按 index 排序保证顺序一致
-        sorted_data = sorted(response.data, key=lambda x: x.index)
-        return [item.embedding for item in sorted_data]
+        batch_size = settings.openai_embedding_batch_size
+        results: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            response = await self._client.embeddings.create(
+                model=self._model,
+                input=batch,
+            )
+            sorted_data = sorted(response.data, key=lambda x: x.index)
+            results.extend(item.embedding for item in sorted_data)
+        return results
 
     def get_dimension(self) -> int:
         return _DIMENSIONS.get(self._model, 1536)
