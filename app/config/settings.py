@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     # ── OCR 服务（paddleocr_parser provider 专用）─────────────────────────────
     ocr_service_url: str = "http://localhost:7998"
 
+    # ── 文档解析服务（mineru_parser provider 专用）────────────────────────────
+    mineru_service_url: str = "http://localhost:7999"
+
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True
     semantic_cache_threshold: float = 0.90          # 余弦相似度命中阈值

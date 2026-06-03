@@ -978,7 +978,41 @@ RAGOrchestrator.chat()
 
 ---
 
-## Phase 15+：Java 控制面
+## Phase 15：扫描版 PDF 处理 + 文档解析健壮性 ✅
+
+**目标**：修复扫描版 PDF 静默失败问题，建立"先快后慢"两阶段解析降级机制，并在 Activity 层加空文本 Guard 兜底。
+
+### 架构设计
+
+PaddleOCR 以独立 HTTP 容器服务运行，`PaddleOCRParserProvider` 变为无状态 HTTP 客户端（对标 Infinity Reranker 模式，见 ADR-053）。`SmartParserProvider` 封装两阶段降级逻辑，与 `ResilientLLMProvider` 模式一致（见 ADR-054）。
+
+### 新增文件（4 个）
+
+| 文件 | 说明 |
+|------|------|
+| `docker/paddleocr/Dockerfile` | OCR 服务镜像，基于 python:3.11-slim，内含 FastAPI + PaddleOCR |
+| `docker/paddleocr/main.py` | OCR 容器 FastAPI app，提供 `POST /ocr` 和 `GET /health`，置信度 ≥ 0.7 过滤 |
+| `app/providers/parser/smart_parser_provider.py` | `SmartParserProvider`：unstructured 快速提取 → 文本 < 100 字符且为 PDF 时自动触发 PaddleOCR 降级；metadata 写入 `ocr_fallback: True` 供审计 |
+
+### 修改文件（6 个）
+
+| 文件 | 改动 |
+|------|------|
+| `app/providers/parser/paddleocr_provider.py` | 从本地模型加载重写为无状态 httpx HTTP 客户端，调用 OCR 容器服务 |
+| `app/providers/parser/unstructured_provider.py` | `partition()` 改用 `strategy="fast"`，禁止自行调用 Tesseract |
+| `app/providers/embedding/openai_embedding.py` | 新增按 `batch_size=10` 分批请求逻辑，修复第三方兼容 API 批量限制报错 |
+| `app/workflows/ingestion_activities.py` | `parse_activity` 新增空文本 Guard：解析为空时写 `FAILED` + `error_message`，以 `non_retryable=True` 终止 Workflow |
+| `app/infrastructure/postgres/repositories/chunk_repo.py` | `update_document_status()` 新增 `error_message` 参数支持，`DELETED` 状态补写 `deleted_at` |
+| `docker-compose.yml` | 追加 `paddleocr` 服务（端口 7998、healthcheck、volume `paddleocr_models`）|
+
+### 架构决策
+
+- [ADR-053](../docs/adr/ADR-053-paddleocr-container-service.md) — PaddleOCR 以独立 HTTP 容器服务运行
+- [ADR-054](../docs/adr/ADR-054-smart-parser-two-phase-fallback.md) — SmartParserProvider 两阶段解析与空文本 Guard
+
+---
+
+## Phase 16+：Java 控制面
 
 **条件**：Python MVP 稳定、有真实多用户接入需求时启动。
 

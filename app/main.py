@@ -33,6 +33,7 @@ def _register_components() -> None:
     import app.pipeline.strategies.ingestion.ocr_strategy  # noqa: F401
     import app.pipeline.strategies.ingestion.standard_strategy  # noqa: F401
     import app.providers.embedding.openai_embedding  # noqa: F401
+    import app.providers.parser.mineru_provider  # noqa: F401
     import app.providers.parser.paddleocr_provider  # noqa: F401
     import app.providers.parser.smart_parser_provider  # noqa: F401
     import app.providers.parser.unstructured_provider  # noqa: F401

@@ -31,7 +31,7 @@ class IngestionInput:
     embedding_provider: str = "openai_embedding"
     chunk_size: int = 512
     chunk_overlap: int = 64
-    parser_provider: str = "smart_parser"
+    parser_provider: str = "mineru_parser"
 
 def _make_context(inp: IngestionInput) -> ProcessingContext:
     """从 Activity 输入构造 ProcessingContext"""
