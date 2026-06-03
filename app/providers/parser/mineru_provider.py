@@ -15,15 +15,26 @@ logger = logging.getLogger(__name__)
 @registry.provider("mineru_parser")
 class MinerUParserProvider(ParserProvider):
     """
-    通过 MinerU 容器服务解析文档，同时支持原生 PDF 和扫描件。
-    MinerU 自动判断解析模式（txt / ocr），输出 Markdown 格式文本。
-    Provider 本身无状态，符合 registry 的设计约定。
+    对接内部 MinerU 文档解析服务（HTTP 接口）。
 
-    服务启动方式见 docker-compose.yml mineru 服务配置。
+    使用 POST /file_parse 同步端点，返回 Markdown 格式文本。
+    支持 PDF、图片、DOCX、PPTX、XLSX。
+
+    服务地址通过 MINERU_SERVICE_URL 环境变量配置。
     """
 
     provider_id = "mineru_parser"
-    _SUPPORTED = {"application/pdf", "image/jpeg", "image/png", "image/tiff", "image/bmp"}
+    _SUPPORTED = {
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/tiff",
+        "image/bmp",
+        "image/webp",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",   # docx
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation", # pptx
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",         # xlsx
+    }
 
     def __init__(self) -> None:
         self._base_url = settings.mineru_service_url.rstrip("/")
@@ -45,22 +56,43 @@ class MinerUParserProvider(ParserProvider):
 
         filename = file_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
 
-        # MinerU 处理复杂 PDF（含大量图表/公式）耗时较长，超时设为 300s
         async with httpx.AsyncClient(timeout=300) as client:
             resp = await client.post(
-                f"{self._base_url}/parse",
-                files={"file": (filename, data)},
+                f"{self._base_url}/file_parse",
+                data={
+                    "backend": settings.mineru_backend,
+                    "parse_method": "auto",
+                    "lang_list": settings.mineru_lang_list,
+                    "return_md": "true",
+                    "formula_enable": "true",
+                    "table_enable": "true",
+                },
+                files={"files": (filename, data)},
             )
             resp.raise_for_status()
 
         body = resp.json()
 
+        # 响应格式：{"results": [{"md_content": "..."}]} 或 [{"md_content": "..."}]
+        results = body.get("results", body) if isinstance(body, dict) else body
+        first = results[0] if isinstance(results, list) and results else {}
+        md_text = first.get("md_content", "") if isinstance(first, dict) else ""
+
+        if not md_text:
+            logger.warning("MinerU returned empty md_content for %s", filename)
+
+        title = ""
+        for line in md_text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+
         return ParsedDocument(
-            text=body["text"],
-            title=body.get("title", ""),
+            text=md_text,
+            title=title,
             metadata={
                 "provider": "mineru",
-                "is_ocr": body.get("is_ocr", False),
-                "char_count": body.get("char_count", len(body["text"])),
+                "backend": settings.mineru_backend,
+                "char_count": len(md_text),
             },
         )
