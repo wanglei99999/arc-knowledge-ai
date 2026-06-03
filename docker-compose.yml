@@ -197,6 +197,21 @@ services:
       timeout: 10s
       retries: 5
 
+  # ── 文档解析服务（MinerU）────────────────────────────────────────────────────
+  mineru:
+    build:
+      context: ./docker/mineru
+    ports:
+      - "7999:7999"
+    volumes:
+      - mineru_models:/root/.cache/huggingface   # MinerU 模型缓存
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7999/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5   # 首次启动下载模型较慢，重试次数多一些
+
 
 volumes:
   postgres_data:
@@ -208,3 +223,4 @@ volumes:
   prometheus_data:
   grafana_data:
   paddleocr_models:
+  mineru_models:
