@@ -13,6 +13,11 @@ _DIMENSIONS: dict[str, int] = {
     "text-embedding-ada-002": 1536,
     "text-embedding-v3": 1024,
     "text-embedding-v4": 1024,
+    # BGE 系列（本地部署）
+    "bge-large-zh-v1.5": 1024,
+    "bge-large-en-v1.5": 1024,
+    "bge-m3": 1024,
+    "/model": 1024,   # vLLM 以挂载路径作为 model name 时的兜底
 }
 
 
