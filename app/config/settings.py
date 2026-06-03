@@ -49,12 +49,16 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     temporal_task_queue: str = "arc-ingestion"
 
-    # ── OpenAI ────────────────────────────────────────────────────────────────
-    openai_base_url: str = "https://api.openai.com/v1"
+    # ── LLM 服务（OpenAI 兼容接口）───────────────────────────────────────────
+    openai_base_url: str = "https://api.openai.com/v1"   # LLM 服务地址
     openai_api_key: str = Field(default="", repr=False)
-    openai_embedding_model: str = "text-embedding-3-small"
     openai_llm_model: str = "gpt-4o-mini"
-    openai_embedding_batch_size: int = 10  # API 单次最大 batch 数，官方 OpenAI 支持 2048
+
+    # ── Embedding 服务（OpenAI 兼容接口，可与 LLM 分开部署）─────────────────
+    openai_embedding_base_url: str = ""          # 留空则复用 openai_base_url
+    openai_embedding_api_key: str = Field(default="", repr=False)  # 留空则复用 openai_api_key
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_batch_size: int = 10
 
     # ── Ollama（本地 LLM）────────────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"

@@ -32,9 +32,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         api_key: str | None = None,
         model: str | None = None,
     ) -> None:
+        # embedding 服务可单独部署：优先读 embedding 专用配置，留空则复用 LLM 配置
+        effective_base_url = settings.openai_embedding_base_url or settings.openai_base_url
+        effective_api_key = api_key or settings.openai_embedding_api_key or settings.openai_api_key
         self._client = AsyncOpenAI(
-            api_key=api_key or settings.openai_api_key,
-            base_url=settings.openai_base_url,
+            api_key=effective_api_key,
+            base_url=effective_base_url,
         )
         self._model = model or settings.openai_embedding_model
 
