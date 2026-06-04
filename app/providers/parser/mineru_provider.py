@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 
 import httpx
 
@@ -10,6 +12,9 @@ from app.pipeline.core.registry import registry
 from app.providers.base import HealthStatus, ParsedDocument, ParserProvider
 
 logger = logging.getLogger(__name__)
+
+# MinerU 单任务服务，全局信号量保证同一时刻只有一个请求在处理
+_mineru_sem = asyncio.Semaphore(1)
 
 
 @registry.provider("mineru_parser")
@@ -54,28 +59,54 @@ class MinerUParserProvider(ParserProvider):
         with open(file_path, "rb") as f:
             data = f.read()
 
-        filename = file_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        original_filename = file_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        # 每次提交加 UUID 前缀，避免 Temporal 重试时 MinerU 返回 409 Conflict
+        filename = f"{uuid.uuid4().hex}_{original_filename}"
 
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{self._base_url}/file_parse",
-                data={
-                    "backend": settings.mineru_backend,
-                    "parse_method": "auto",
-                    "lang_list": settings.mineru_lang_list,
-                    "return_md": "true",
-                    "formula_enable": "true",
-                    "table_enable": "true",
-                },
-                files={"files": (filename, data)},
-            )
-            resp.raise_for_status()
+        form: dict[str, str] = {
+            "backend": settings.mineru_backend,
+            "parse_method": "auto",
+            "return_md": "true",
+            "formula_enable": "true",
+            "table_enable": "true",
+            "lang_list": settings.mineru_lang_list[0] if settings.mineru_lang_list else "ch",
+        }
+        if settings.mineru_server_url:
+            form["server_url"] = settings.mineru_server_url
+
+        async with _mineru_sem:
+            max_attempts = 30
+            retry_interval = 20
+            async with httpx.AsyncClient(timeout=600) as client:
+                for attempt in range(max_attempts):
+                    resp = await client.post(
+                        f"{self._base_url}/file_parse",
+                        data=form,
+                        files=[("files", (filename, data))],
+                    )
+                    if resp.status_code == 409:
+                        if attempt < max_attempts - 1:
+                            logger.warning(
+                                "MinerU busy (409), waiting %ds before retry %d/%d",
+                                retry_interval, attempt + 1, max_attempts,
+                            )
+                            await asyncio.sleep(retry_interval)
+                            continue
+                    if resp.status_code == 422:
+                        logger.error("MinerU 422 detail: %s", resp.text)
+                    resp.raise_for_status()
+                    break
 
         body = resp.json()
 
-        # 响应格式：{"results": [{"md_content": "..."}]} 或 [{"md_content": "..."}]
-        results = body.get("results", body) if isinstance(body, dict) else body
-        first = results[0] if isinstance(results, list) and results else {}
+        # 响应格式：{"results": {"<filename>": {"md_content": "..."}}}
+        results = body.get("results", {}) if isinstance(body, dict) else {}
+        if isinstance(results, dict):
+            first = next(iter(results.values()), {})
+        elif isinstance(results, list):
+            first = results[0] if results else {}
+        else:
+            first = {}
         md_text = first.get("md_content", "") if isinstance(first, dict) else ""
 
         if not md_text:

@@ -43,8 +43,8 @@ class TenantConfig:
     llm_provider: str = "openai_llm"
     default_llm_model: str = ""          # 空字符串 = 使用 Provider 自己的 settings 默认值
     allowed_models: list[str] = field(default_factory=list)  # 空列表 = 不限制
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 400
+    chunk_overlap: int = 50
     top_k: int = 10
     rerank_enabled: bool = True
     query_rewrite_enabled: bool = True

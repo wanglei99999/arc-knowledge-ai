@@ -55,6 +55,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             return []
 
         batch_size = settings.openai_embedding_batch_size
+        # bge 系列 max 512 tokens；CJK 约 1 char/token，截断至 450 字符留出特殊 token 余量
+        max_chars = 450
+        texts = [t[:max_chars] if len(t) > max_chars else t for t in texts]
+
         results: list[list[float]] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]

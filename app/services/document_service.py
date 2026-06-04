@@ -27,8 +27,8 @@ class IngestRequest:
     # 租户配置（由控制面传入，或从 Nacos 查询）
     ingestion_strategy: str = "standard"
     embedding_provider: str = "openai_embedding"
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 400
+    chunk_overlap: int = 50
 
 
 @dataclass
