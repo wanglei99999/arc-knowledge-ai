@@ -107,8 +107,9 @@ class Settings(BaseSettings):
 
     # ── 文档解析服务（mineru_parser provider 专用）────────────────────────────
     mineru_service_url: str = "http://localhost:7999"
-    mineru_lang_list: list[str] = Field(default=["ch"])   # OCR 语言，ch=中英文
-    mineru_backend: str = "pipeline"                       # pipeline/hybrid-auto-engine/vlm-auto-engine
+    mineru_lang_list: list[str] = Field(default=["ch"])
+    mineru_backend: str = "hybrid-auto-engine"             # pipeline/hybrid-auto-engine/hybrid-http-client/vlm-auto-engine/vlm-http-client
+    mineru_server_url: str = ""                            # hybrid-http-client/vlm-http-client 时填 openai-compatible server URL
 
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True

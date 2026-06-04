@@ -10,8 +10,13 @@ from app.providers.base import ParsedDocument
 
 
 def _estimate_tokens(text: str) -> int:
-    """粗略估算 token 数（1 token ≈ 4 字符），无外部依赖"""
-    return max(1, len(text) // 4)
+    """估算 token 数，兼容中英文混合文本。
+    CJK 字符（含标点）在 BERT/bge 系列 tokenizer 中约 1 字符 = 1 token；
+    ASCII 词语约 1 token per 4 chars。
+    """
+    cjk = sum(1 for c in text if "一" <= c <= "鿿" or "　" <= c <= "〿" or "＀" <= c <= "￯")
+    ascii_chars = len(text) - cjk
+    return max(1, cjk + ascii_chars // 4)
 
 
 #文本切割算法如下：

@@ -29,8 +29,8 @@ class IngestionInput:
     # 租户配置快照（避免 Activity 执行期间配置变更导致不一致）
     ingestion_strategy: str = "standard"
     embedding_provider: str = "openai_embedding"
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 400
+    chunk_overlap: int = 50
     parser_provider: str = "mineru_parser"
 
 def _make_context(inp: IngestionInput) -> ProcessingContext:
