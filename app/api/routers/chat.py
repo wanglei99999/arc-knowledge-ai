@@ -27,13 +27,18 @@ class ChatRequestBody(BaseModel):
 
 async def _sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
     """将 token / citations 流包装为 SSE 格式"""
-    async for item in event_iter:
-        if isinstance(item, list):
-            payload = json.dumps({"citations": item}, ensure_ascii=False)
-        else:
-            payload = json.dumps({"delta": item}, ensure_ascii=False)
-        yield f"data: {payload}\n\n".encode()
-    yield b"data: [DONE]\n\n"
+    try:
+        async for item in event_iter:
+            if isinstance(item, list):
+                payload = json.dumps({"citations": item}, ensure_ascii=False)
+            else:
+                payload = json.dumps({"delta": item}, ensure_ascii=False)
+            yield f"data: {payload}\n\n".encode()
+    except Exception as exc:
+        error_payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
+        yield f"data: {error_payload}\n\n".encode()
+    finally:
+        yield b"data: [DONE]\n\n"
 
 
 @router.post("")
