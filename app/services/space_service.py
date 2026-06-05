@@ -18,3 +18,6 @@ class SpaceService:
         user_id: str,
     ) -> Space:
         return await self._repo.create(tenant_id, name, created_by=user_id)
+
+    async def delete_space(self, tenant_id: str, space_id: str) -> bool:
+        return await self._repo.archive(tenant_id, space_id)

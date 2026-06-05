@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status as http_status
 from pydantic import BaseModel
 
 from app.api.dependencies import UserContext, require_user
@@ -51,5 +51,18 @@ async def create_space(
         status=space.status,
         created_by=space.created_by,
     )
-    
+
+
+@router.delete("/{space_id}", status_code=204)
+async def delete_space(
+    space_id: str,
+    ctx: UserContext = Depends(require_user),
+) -> None:
+    deleted = await _service.delete_space(ctx.tenant_id, space_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Space not found",
+        )
+
 

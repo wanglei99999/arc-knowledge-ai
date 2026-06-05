@@ -126,8 +126,16 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
         metadata=parsed_dict.get("metadata", {}),
     )
 
-    chunker_stage = registry.get_stage("token_chunker")
-    chunks: list[DocumentChunk] = await chunker_stage.execute(ctx, parsed)
+    try:
+        chunker_stage = registry.get_stage("token_chunker")
+        chunks: list[DocumentChunk] = await chunker_stage.execute(ctx, parsed)
+    except Exception as exc:
+        repo = ChunkRepository()
+        await repo.update_document_status(
+            inp.document_id, inp.tenant_id, DocumentStatus.FAILED,
+            error_message=f"切片失败：{type(exc).__name__}: {exc}",
+        )
+        raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
 
     return [
         {
@@ -189,6 +197,11 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         # Temporal SDK 递归序列化该链时会撞上 Python 的 recursion limit，
         # 导致真正的错误被 "Failed building exception result" 吞掉。
         # 用 from None 截断链，保留错误类型和消息，让 Temporal 能正常上报。
+        repo = ChunkRepository()
+        await repo.update_document_status(
+            inp.document_id, inp.tenant_id, DocumentStatus.FAILED,
+            error_message=f"向量化/索引失败：{type(exc).__name__}: {exc}",
+        )
         raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
 
     return len(embedded_chunks)
