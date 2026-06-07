@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     reranker_offline: bool = True               # True=只用本地缓存；False=允许联网下载
     reranker_model_path: str = ""               # 留空则用 HuggingFace model id；填本地目录路径则直接加载
 
+    # ── Tokenizer（精确 token 计数）──────────────────────────────────────────
+    tokenizer_model: str = "Qwen/Qwen3-8B"     # HuggingFace model id 或本地路径
+    llm_context_window: int = 32768             # LLM 最大上下文 token 数
+    llm_context_reserved: int = 4096           # 为 system 模板 + 历史 + 生成预留的 token 数
+
     # ── Infinity 推理服务（infinity_rerank provider 专用）────────────────────
     infinity_base_url: str = "http://localhost:7997"
     infinity_rerank_model: str = "BAAI/bge-reranker-v2-m3"

@@ -13,6 +13,7 @@ from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
 from app.providers.llm.model_hub import model_hub
 from app.services.tenant_config_service import TenantConfigService
+from app.utils.tokenizer import count_tokens
 
 # 系统 Prompt 模板
 _SYSTEM_PROMPT = """你是一个知识库问答助手。请根据以下检索到的文档片段回答用户问题。
@@ -207,9 +208,45 @@ class RAGOrchestrator:
         result: RetrievalResult,
         history: list[ChatMessage],
     ) -> list[ChatMessage]:
+        from app.config.settings import settings
+
+        # 计算可用于 chunk context 的 token 预算
+        history_tokens = sum(count_tokens(m.content) for m in history)
+        query_tokens = count_tokens(result.query_text)
+        template_tokens = count_tokens(_SYSTEM_PROMPT.replace("{context}", ""))
+        budget = (
+            settings.llm_context_window
+            - settings.llm_context_reserved
+            - history_tokens
+            - query_tokens
+            - template_tokens
+        )
+
+        context = self._truncate_context(result, max_tokens=max(budget, 0))
         system = ChatMessage(
             role="system",
-            content=_SYSTEM_PROMPT.format(context=result.context_text),
+            content=_SYSTEM_PROMPT.format(context=context),
         )
         user = ChatMessage(role="user", content=result.query_text)
         return [system, *history, user]
+
+    @staticmethod
+    def _truncate_context(result: RetrievalResult, max_tokens: int) -> str:
+        """按检索相关性顺序加入 chunk，超出 token 预算时截止。"""
+        chunk_map = {c["chunk_id"]: c for c in result.chunks}
+        parts: list[str] = []
+        used = 0
+
+        for i, hit in enumerate(result.hits, 1):
+            chunk = chunk_map.get(hit.chunk_id)
+            if not chunk:
+                continue
+            doc_name = chunk.get("original_name") or hit.document_id
+            part = f"[{i}] 来源：{doc_name}\n{chunk['content']}"
+            part_tokens = count_tokens(part)
+            if used + part_tokens > max_tokens:
+                break
+            parts.append(part)
+            used += part_tokens
+
+        return "\n\n".join(parts)
