@@ -7,16 +7,16 @@ from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.pipeline.core.stage import BaseStage
 from app.providers.base import ParsedDocument
+from app.utils.tokenizer import count_tokens
 
 
 def _estimate_tokens(text: str) -> int:
-    """估算 token 数，兼容中英文混合文本。
-    CJK 字符（含标点）在 BERT/bge 系列 tokenizer 中约 1 字符 = 1 token；
-    ASCII 词语约 1 token per 4 chars。
+    """token 计数，优先使用 Qwen tokenizer 精确计算，不可用时降级为字符估算。
+
+    bge-large-zh 是 BERT WordPiece（1 CJK ≈ 1 token），与 Qwen BPE 不同；
+    这里统一使用 count_tokens，保证切片 token 数与实际 LLM 上下文消耗口径一致。
     """
-    cjk = sum(1 for c in text if "一" <= c <= "鿿" or "　" <= c <= "〿" or "＀" <= c <= "￯")
-    ascii_chars = len(text) - cjk
-    return max(1, cjk + ascii_chars // 4)
+    return count_tokens(text)
 
 
 #文本切割算法如下：
