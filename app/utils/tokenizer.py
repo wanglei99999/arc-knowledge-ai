@@ -1,34 +1,53 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
+# 模块级缓存：tokenizer 实例，或加载失败后的 None。
+# 注意：刻意不用 @lru_cache —— 它不缓存抛异常的调用，会导致
+# tokenizer 加载失败时每次 count_tokens 都重新联网重试，拖死服务。
+_tokenizer = None
+_load_attempted = False
 
-@lru_cache(maxsize=1)
-def _load_tokenizer():
-    from transformers import AutoTokenizer
-    from app.config.settings import settings
 
-    logger.info("Loading tokenizer: %s", settings.tokenizer_model)
-    return AutoTokenizer.from_pretrained(
-        settings.tokenizer_model,
-        trust_remote_code=True,
-    )
+def _get_tokenizer():
+    """加载 tokenizer，只尝试一次。失败后缓存 None，后续调用直接降级，不再重试。"""
+    global _tokenizer, _load_attempted
+    if _load_attempted:
+        return _tokenizer
+
+    _load_attempted = True
+    try:
+        from transformers import AutoTokenizer
+
+        from app.config.settings import settings
+
+        logger.info("Loading tokenizer: %s", settings.tokenizer_model)
+        _tokenizer = AutoTokenizer.from_pretrained(
+            settings.tokenizer_model,
+            trust_remote_code=True,
+        )
+    except Exception:
+        logger.warning("Tokenizer 加载失败，降级为字符估算（后续不再重试）", exc_info=True)
+        _tokenizer = None
+    return _tokenizer
 
 
 def count_tokens(text: str) -> int:
-    """精确计算文本的 token 数（基于 Qwen tokenizer）。
+    """计算文本的 token 数，优先使用 Qwen tokenizer 精确计算。
 
-    首次调用会从 HuggingFace 下载 tokenizer 文件（约 7MB），后续从缓存加载。
-    tokenizer 不可用时降级为字符估算，保证服务不中断。
+    首次调用会从 HuggingFace 加载 tokenizer 文件，后续从缓存复用。
+    tokenizer 不可用时降级为字符估算，且加载只尝试一次，
+    失败后所有调用走降级路径，避免重复联网重试拖慢服务。
     """
+    tokenizer = _get_tokenizer()
+    if tokenizer is None:
+        return _char_estimate(text)
     try:
-        tokenizer = _load_tokenizer()
         return len(tokenizer.encode(text, add_special_tokens=False))
     except Exception:
-        logger.warning("Tokenizer unavailable, falling back to char estimate", exc_info=True)
+        logger.warning("Tokenizer encode 失败，降级为字符估算", exc_info=True)
         return _char_estimate(text)
 
 
