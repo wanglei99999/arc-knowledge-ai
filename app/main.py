@@ -26,6 +26,7 @@ def _register_components() -> None:
     """
     # ── Ingestion ────────────────────────────────────────────────────────────
     import app.pipeline.stages.chunking.token_chunker  # noqa: F401
+    import app.pipeline.stages.chunking.markdown_chunker  # noqa: F401
     import app.pipeline.stages.embedding.embed_stage  # noqa: F401
     import app.pipeline.stages.embedding.es_index_stage  # noqa: F401
     import app.pipeline.stages.embedding.milvus_index_stage  # noqa: F401

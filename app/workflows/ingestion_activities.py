@@ -32,6 +32,7 @@ class IngestionInput:
     chunk_size: int = 400
     chunk_overlap: int = 50
     parser_provider: str = "mineru_parser"
+    chunker_stage: str = "token_chunker"   # 或 markdown_chunker（结构感知切分）
 
 def _make_context(inp: IngestionInput) -> ProcessingContext:
     """从 Activity 输入构造 ProcessingContext"""
@@ -127,7 +128,7 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
     )
 
     try:
-        chunker_stage = registry.get_stage("token_chunker")
+        chunker_stage = registry.get_stage(inp.chunker_stage)
         chunks: list[DocumentChunk] = await chunker_stage.execute(ctx, parsed)
     except Exception as exc:
         repo = ChunkRepository()
