@@ -19,6 +19,7 @@ from app.providers.base import ParsedDocument
 @dataclass
 class IngestionInput:
     """Temporal Activity 的序列化输入（必须可 JSON 序列化）"""
+
     tenant_id: str
     document_id: str
     file_path: str
@@ -32,7 +33,9 @@ class IngestionInput:
     chunk_size: int = 400
     chunk_overlap: int = 50
     parser_provider: str = "mineru_parser"
-    chunker_stage: str = "token_chunker"   # 或 markdown_chunker（结构感知切分）
+    chunker_stage: str = "token_chunker"  # 或 markdown_chunker（结构感知切分）
+    metadata: dict | None = None  # 文档级 metadata，透传合并到每个 chunk
+
 
 def _make_context(inp: IngestionInput) -> ProcessingContext:
     """从 Activity 输入构造 ProcessingContext"""
@@ -94,7 +97,7 @@ async def parse_activity(inp: IngestionInput) -> dict:
         parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
         activity.heartbeat("parsed")
 
-        #空文本 Guard
+        # 空文本 Guard
         if not parsed.text.strip():
             repo = ChunkRepository()
             await repo.update_document_status(
@@ -104,9 +107,10 @@ async def parse_activity(inp: IngestionInput) -> dict:
                 error_message="文档解析结果为空，可能为损坏文件或不支持的扫描格式",
             )
             from temporalio.exceptions import ApplicationError
+
             raise ApplicationError(
                 "empty parse result",
-                non_retryable=True,   # 不重试，直接终止 Workflow
+                non_retryable=True,  # 不重试，直接终止 Workflow
             )
 
     finally:
@@ -133,7 +137,9 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
     except Exception as exc:
         repo = ChunkRepository()
         await repo.update_document_status(
-            inp.document_id, inp.tenant_id, DocumentStatus.FAILED,
+            inp.document_id,
+            inp.tenant_id,
+            DocumentStatus.FAILED,
             error_message=f"切片失败：{type(exc).__name__}: {exc}",
         )
         raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
@@ -147,7 +153,7 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
             "content": c.content,
             "chunk_index": c.chunk_index,
             "token_count": c.token_count,
-            "metadata": c.metadata,
+            "metadata": {**c.metadata, **(inp.metadata or {})},
         }
         for c in chunks
     ]
@@ -190,9 +196,7 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         repo = ChunkRepository()
         await repo.save_chunks(embedded_chunks)
         await repo.update_chunk_count(inp.document_id, inp.tenant_id, len(embedded_chunks))
-        await repo.update_document_status(
-            inp.document_id, inp.tenant_id, DocumentStatus.INDEXED
-        )
+        await repo.update_document_status(inp.document_id, inp.tenant_id, DocumentStatus.INDEXED)
     except Exception as exc:
         # gRPC（pymilvus）和其他底层库抛出的异常带有极深的 __cause__ 链，
         # Temporal SDK 递归序列化该链时会撞上 Python 的 recursion limit，
@@ -200,7 +204,9 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         # 用 from None 截断链，保留错误类型和消息，让 Temporal 能正常上报。
         repo = ChunkRepository()
         await repo.update_document_status(
-            inp.document_id, inp.tenant_id, DocumentStatus.FAILED,
+            inp.document_id,
+            inp.tenant_id,
+            DocumentStatus.FAILED,
             error_message=f"向量化/索引失败：{type(exc).__name__}: {exc}",
         )
         raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
