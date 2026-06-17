@@ -5,18 +5,21 @@ import asyncio
 from elasticsearch import Elasticsearch, NotFoundError
 
 from app.config.settings import settings
+from app.domain.metadata_filter import MetadataFilter
+from app.infrastructure.elasticsearch.filter_builder import build_es_clauses
 
 INDEX_NAME = "arc_chunks"
 
 _MAPPINGS = {
     "mappings": {
         "properties": {
-            "chunk_id":    {"type": "keyword"},
+            "chunk_id": {"type": "keyword"},
             "document_id": {"type": "keyword"},
-            "tenant_id":   {"type": "keyword"},
-            "space_id":    {"type": "keyword"},
+            "tenant_id": {"type": "keyword"},
+            "space_id": {"type": "keyword"},
             "chunk_index": {"type": "integer"},
-            "content":     {"type": "text", "analyzer": "standard"},
+            "content": {"type": "text", "analyzer": "standard"},
+            "metadata": {"type": "object", "dynamic": True},
         }
     }
 }
@@ -33,6 +36,7 @@ def _ensure_index(client: Elasticsearch) -> None:
 
 async def reset_index() -> int:
     """删除并重建 arc_chunks 索引（开发环境清盘用）。返回删除前的文档数量。"""
+
     def _reset() -> int:
         client = _get_client()
         count = 0
@@ -63,12 +67,13 @@ async def index_chunks(chunks: list[dict]) -> None:
                 index=INDEX_NAME,
                 id=chunk["chunk_id"],
                 document={
-                    "chunk_id":    chunk["chunk_id"],
+                    "chunk_id": chunk["chunk_id"],
                     "document_id": chunk["document_id"],
-                    "tenant_id":   chunk["tenant_id"],
-                    "space_id":    chunk["space_id"],
+                    "tenant_id": chunk["tenant_id"],
+                    "space_id": chunk["space_id"],
                     "chunk_index": chunk["chunk_index"],
-                    "content":     chunk["content"],
+                    "content": chunk["content"],
+                    "metadata": chunk.get("metadata", {}),
                 },
             )
 
@@ -76,16 +81,33 @@ async def index_chunks(chunks: list[dict]) -> None:
     await loop.run_in_executor(None, _index)
 
 
+def _build_search_filters(
+    tenant_id: str,
+    space_id: str,
+    metadata_filters: list[MetadataFilter] | None = None,
+) -> list[dict]:
+    """拼接 ES bool filter 子句：tenant/space 硬隔离 + 可选 metadata 过滤。"""
+    clauses: list[dict] = [
+        {"term": {"tenant_id": tenant_id}},
+        {"term": {"space_id": space_id}},
+    ]
+    if metadata_filters:
+        clauses.extend(build_es_clauses(metadata_filters))
+    return clauses
+
+
 async def bm25_search(
     query_text: str,
     tenant_id: str,
     space_id: str,
     top_k: int = 10,
+    metadata_filters: list[MetadataFilter] | None = None,
 ) -> list[dict]:
     """
-    BM25 全文检索，按 tenant_id 过滤。
+    BM25 全文检索，按 tenant_id/space_id 过滤 + 可选 metadata 过滤。
     返回 [{chunk_id, document_id, chunk_index, score}]
     """
+
     def _search() -> list[dict]:
         client = _get_client()
         try:
@@ -94,11 +116,8 @@ async def bm25_search(
                 body={
                     "query": {
                         "bool": {
-                            "must":   {"match": {"content": query_text}},
-                            "filter": [
-                            {"term": {"tenant_id": tenant_id}},
-                            {"term": {"space_id": space_id}},
-                        ],
+                            "must": {"match": {"content": query_text}},
+                            "filter": _build_search_filters(tenant_id, space_id, metadata_filters),
                         }
                     },
                     "size": top_k,
@@ -108,10 +127,10 @@ async def bm25_search(
             return []
         return [
             {
-                "chunk_id":    hit["_source"]["chunk_id"],
+                "chunk_id": hit["_source"]["chunk_id"],
                 "document_id": hit["_source"]["document_id"],
                 "chunk_index": hit["_source"]["chunk_index"],
-                "score":       hit["_score"],
+                "score": hit["_score"],
             }
             for hit in resp["hits"]["hits"]
         ]
@@ -122,6 +141,7 @@ async def bm25_search(
 
 async def delete_by_document(document_id: str, tenant_id: str) -> None:
     """删除某文档的全部 ES 记录（重新入库时使用）"""
+
     def _delete() -> None:
         client = _get_client()
         client.delete_by_query(
@@ -131,7 +151,7 @@ async def delete_by_document(document_id: str, tenant_id: str) -> None:
                     "bool": {
                         "must": [
                             {"term": {"document_id": document_id}},
-                            {"term": {"tenant_id":   tenant_id}},
+                            {"term": {"tenant_id": tenant_id}},
                         ]
                     }
                 }
