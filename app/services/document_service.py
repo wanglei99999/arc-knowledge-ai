@@ -8,8 +8,8 @@ from temporalio.client import Client
 from app.config.settings import settings
 from app.domain.document import DocumentStatus
 from app.infrastructure.elasticsearch.client import delete_by_document as es_delete_by_document
-from app.infrastructure.minio.client import delete_file as minio_delete_file
 from app.infrastructure.milvus.client import delete_by_document as milvus_delete_by_document
+from app.infrastructure.minio.client import delete_file as minio_delete_file
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
 from app.workflows.ingestion_activities import IngestionInput
@@ -20,7 +20,7 @@ from app.workflows.ingestion_workflow import IngestionWorkflow
 class IngestRequest:
     tenant_id: str
     space_id: str
-    file_path: str       # MinIO object key
+    file_path: str  # MinIO object key
     mime_type: str
     original_filename: str
     document_id: str | None = None  # API 层上传 MinIO 后传入，None 时自动生成
@@ -29,6 +29,7 @@ class IngestRequest:
     embedding_provider: str = "openai_embedding"
     chunk_size: int = 400
     chunk_overlap: int = 50
+    metadata: dict | None = None  # 文档级 metadata（透传到每个 chunk）
 
 
 @dataclass
@@ -74,6 +75,7 @@ class DocumentService:
             embedding_provider=req.embedding_provider,
             chunk_size=req.chunk_size,
             chunk_overlap=req.chunk_overlap,
+            metadata=req.metadata,
         )
 
         client = await self._get_temporal_client()

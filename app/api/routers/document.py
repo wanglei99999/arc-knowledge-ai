@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
@@ -10,6 +12,23 @@ from app.services.document_service import DeleteResult, DocumentService, IngestR
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 _service = DocumentService()
+
+
+def _parse_metadata(raw: str | None) -> dict:
+    """解析上传时的文档级 metadata（JSON 字符串），非法返回 400。"""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="metadata 必须是合法 JSON"
+        ) from None
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="metadata 必须是 JSON object"
+        ) from None
+    return data
 
 
 class UploadResponse(BaseModel):
@@ -32,6 +51,7 @@ class StatusResponse(BaseModel):
 async def upload_document(
     file: UploadFile,
     space_id: str,
+    metadata: str | None = None,
     x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
 ) -> UploadResponse:
     """
@@ -48,6 +68,7 @@ async def upload_document(
 
     # 上传到 MinIO
     import uuid
+
     document_id = str(uuid.uuid4())
     data = await file.read()
     object_key = build_object_key(x_tenant_id, space_id, document_id, file.filename)
@@ -72,6 +93,7 @@ async def upload_document(
         mime_type=mime_type,
         original_filename=file.filename,
         document_id=document_id,
+        metadata=_parse_metadata(metadata),
     )
 
     result = await _service.ingest(req)
@@ -117,6 +139,7 @@ async def list_chunks(
     x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
 ) -> dict:
     from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+
     repo = ChunkRepository()
     chunks = await repo.get_chunks_by_document(document_id, x_tenant_id)
     return {"items": chunks, "total": len(chunks)}
@@ -141,8 +164,8 @@ async def delete_document(
         return await _service.delete(document_id, x_tenant_id)
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND
-            if "not found" in str(e)
-            else status.HTTP_409_CONFLICT,
+            status_code=(
+                status.HTTP_404_NOT_FOUND if "not found" in str(e) else status.HTTP_409_CONFLICT
+            ),
             detail=str(e),
         ) from e
