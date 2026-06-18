@@ -32,6 +32,7 @@ class KeywordSearchStage(BaseStage[SearchContext, SearchContext]):
             tenant_id=query.tenant_id,
             space_id=query.space_id,
             top_k=query.top_k,
+            metadata_filters=query.metadata_filters,
         )
         keyword_hits = [
             SearchHit(

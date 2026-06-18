@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import require_tenant
+from app.api.filter_params import parse_metadata_filters_json
 from app.services.debug_retrieval_service import DebugRetrievalService, DebugSearchRequest
 from app.services.retrieval_service import RetrievalService, SearchRequest
 
@@ -17,6 +18,10 @@ async def search(
     space_id: str = Query(..., description="知识空间 ID"),
     top_k: int = Query(default=10, ge=1, le=50),
     score_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
+    filters: str | None = Query(
+        default=None,
+        description='元数据过滤条件，JSON 数组，如 [{"key":"project","operator":"eq","value":"A"}]',
+    ),
     tenant_id: str = Depends(require_tenant),
 ) -> dict:
     """
@@ -30,12 +35,13 @@ async def search(
         space_id=space_id,
         top_k=top_k,
         score_threshold=score_threshold,
+        metadata_filters=parse_metadata_filters_json(filters),
     )
     resp = await _service.search(req)
     return {
-        "query":  resp.query,
-        "total":  resp.total,
-        "hits":   resp.hits,
+        "query": resp.query,
+        "total": resp.total,
+        "hits": resp.hits,
         "chunks": resp.chunks,
     }
 

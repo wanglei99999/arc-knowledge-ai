@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalResult
 from app.workflows.rag_orchestrator import RAGOrchestrator
 
@@ -15,12 +16,13 @@ class SearchRequest:
     space_id: str = "default"
     top_k: int = 10
     score_threshold: float = 0.5
+    metadata_filters: list[MetadataFilter] = field(default_factory=list)
 
 
 @dataclass
 class SearchResponse:
     query: str
-    hits: list[dict]    # [{chunk_id, document_id, chunk_index, score, source}]
+    hits: list[dict]  # [{chunk_id, document_id, chunk_index, score, source}]
     chunks: list[dict]  # [{chunk_id, content, document_id, chunk_index, ...}]
     total: int
 
@@ -35,15 +37,16 @@ class RetrievalService:
             space_id=req.space_id,
             top_k=req.top_k,
             score_threshold=req.score_threshold,
+            metadata_filters=req.metadata_filters,
         )
         hits = [
             {
-                "chunk_id":    h.chunk_id,
+                "chunk_id": h.chunk_id,
                 "document_id": h.document_id,
                 "chunk_index": h.chunk_index,
-                "score":       h.score,
-                "source":      h.source,
-                "rank":        h.rank,
+                "score": h.score,
+                "source": h.source,
+                "rank": h.rank,
             }
             for h in result.hits
         ]

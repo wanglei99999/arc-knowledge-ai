@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.domain.metadata_filter import MetadataFilter
+
 
 @dataclass
 class RetrievalQuery:
     """检索请求，贯穿整条 Retrieval Pipeline"""
+
     query_text: str
     tenant_id: str
     space_id: str = "default"
@@ -15,17 +18,20 @@ class RetrievalQuery:
     expanded_queries: list[str] = field(default_factory=list)
     # QueryRewriteStage 意图识别结果；False 时各 SearchStage 返回空 hits
     intent_is_valid: bool = True
+    # 通用元数据过滤条件；各 SearchStage 透传给 Milvus/ES（为空时不过滤）
+    metadata_filters: list[MetadataFilter] = field(default_factory=list)
 
 
 @dataclass
 class SearchHit:
     """单条检索命中记录"""
+
     chunk_id: str
     document_id: str
     chunk_index: int
     score: float
-    source: str = "unknown"   # "vector" | "keyword"
-    rank: int = 0             # RRFFusionStage 填充
+    source: str = "unknown"  # "vector" | "keyword"
+    rank: int = 0  # RRFFusionStage 填充
 
 
 @dataclass
@@ -40,6 +46,7 @@ class SearchContext:
     - RRFFusionStage     → 填 ranked_hits
     - RerankStage        → 读 ranked_hits，输出最终 list[SearchHit]
     """
+
     query: RetrievalQuery
     vector_hits: list[SearchHit] = field(default_factory=list)
     keyword_hits: list[SearchHit] = field(default_factory=list)
@@ -50,10 +57,11 @@ class SearchContext:
 @dataclass
 class RetrievalResult:
     """检索最终结果，交给 RAGOrchestrator 做生成"""
+
     query_text: str
     hits: list[SearchHit]
     # 从 PostgreSQL 查回的 chunk 文本，key 为 chunk_id
-    chunks: list[dict]        # [{chunk_id, content, document_id, chunk_index, ...}]
+    chunks: list[dict]  # [{chunk_id, content, document_id, chunk_index, ...}]
 
     @property
     def context_text(self) -> str:

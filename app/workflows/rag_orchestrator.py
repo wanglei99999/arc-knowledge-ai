@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
+from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
@@ -25,7 +26,7 @@ _SYSTEM_PROMPT = """你是一个知识库问答助手。请根据以下检索到
 
 _FAKE_QUOTA = QuotaSnapshot(
     max_documents=10000,
-    max_storage_bytes=10 * 1024 ** 3,
+    max_storage_bytes=10 * 1024**3,
     max_api_calls_per_day=100000,
     used_documents=0,
     used_storage_bytes=0,
@@ -50,7 +51,7 @@ class RAGOrchestrator:
     def _make_ctx(self, tenant_id: str, config: TenantConfig) -> ProcessingContext:
         return ProcessingContext.create(
             tenant_id=tenant_id,
-            document_id="",          # 检索阶段无单一 document_id
+            document_id="",  # 检索阶段无单一 document_id
             quota=_FAKE_QUOTA,
             config=config,
             trace_id=str(uuid.uuid4()),
@@ -67,6 +68,7 @@ class RAGOrchestrator:
         top_k: int = 10,
         score_threshold: float = 0.5,
         model: str | None = None,
+        metadata_filters: list[MetadataFilter] | None = None,
     ) -> RetrievalResult:
         """执行混合检索，返回带文本的检索结果。"""
         config = await self._tenant_config_svc.get_or_default(tenant_id)
@@ -83,9 +85,10 @@ class RAGOrchestrator:
             space_id=space_id,
             top_k=top_k,
             score_threshold=score_threshold,
+            metadata_filters=metadata_filters or [],
         )
         search_ctx = SearchContext(query=query)
-        hits = await pipeline.run(ctx, search_ctx)   # → list[SearchHit]
+        hits = await pipeline.run(ctx, search_ctx)  # → list[SearchHit]
 
         # 从 PostgreSQL 拉取 chunk 文本
         chunk_ids = [h.chunk_id for h in hits]
@@ -139,6 +142,7 @@ class RAGOrchestrator:
         top_k: int = 10,
         score_threshold: float = 0.5,
         model: str | None = None,
+        metadata_filters: list[MetadataFilter] | None = None,
     ) -> AsyncIterator[str | list]:
         """
         带语义缓存的流式问答门面。
@@ -146,7 +150,10 @@ class RAGOrchestrator:
         history 为空（首轮）时走缓存路径；有历史记录时直接走 RAG，
         避免多轮上下文污染缓存答案。
         """
-        if not history:
+        # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
+        # 否则同一 query 不同过滤条件会命中错误的缓存答案。
+        use_cache = not history and not metadata_filters
+        if use_cache:
             cached = await _cache.get(query, tenant_id, space_id)
             if cached:
                 yield cached.answer
@@ -161,11 +168,9 @@ class RAGOrchestrator:
             top_k=top_k,
             score_threshold=score_threshold,
             model=model,
+            metadata_filters=metadata_filters,
         )
-        history_messages = [
-            ChatMessage(role=m["role"], content=m["content"])
-            for m in history
-        ]
+        history_messages = [ChatMessage(role=m["role"], content=m["content"]) for m in history]
 
         tokens: list[str] = []
         async for token in self.stream_generate(
@@ -181,23 +186,21 @@ class RAGOrchestrator:
         if citations:
             yield citations
 
-        if not history:
-            asyncio.create_task(
-                _cache.set(query, "".join(tokens), citations, tenant_id, space_id)
-            )
+        if use_cache:
+            asyncio.create_task(_cache.set(query, "".join(tokens), citations, tenant_id, space_id))
 
     @staticmethod
     def _build_citations(result: RetrievalResult) -> list[dict]:
         chunk_map = {c["chunk_id"]: c for c in result.chunks}
         return [
             {
-                "doc_id":      h.document_id,
-                "chunk_id":    h.chunk_id,
-                "doc_name":    chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
+                "doc_id": h.document_id,
+                "chunk_id": h.chunk_id,
+                "doc_name": chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
                 "chunk_index": h.chunk_index,
-                "content":     chunk_map.get(h.chunk_id, {}).get("content", ""),
-                "score":       round(h.score, 4),
-                "source":      h.source,
+                "content": chunk_map.get(h.chunk_id, {}).get("content", ""),
+                "score": round(h.score, 4),
+                "source": h.source,
             }
             for h in result.hits
             if h.chunk_id in chunk_map

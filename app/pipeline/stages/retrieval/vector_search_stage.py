@@ -27,6 +27,7 @@ class VectorSearchStage(BaseStage[SearchContext, SearchContext]):
         if self._provider is not None:
             return self._provider
         from app.pipeline.core.registry import registry as _reg
+
         return _reg.get_provider(ctx.config.embedding_provider)  # type: ignore[return-value]
 
     async def _execute(
@@ -50,6 +51,7 @@ class VectorSearchStage(BaseStage[SearchContext, SearchContext]):
                 space_id=query.space_id,
                 top_k=query.top_k,
                 score_threshold=query.score_threshold,
+                metadata_filters=query.metadata_filters,
             )
             for h in raw_hits:
                 hit = SearchHit(
