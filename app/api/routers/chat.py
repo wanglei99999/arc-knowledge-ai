@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.dependencies import UserContext, require_user
+from app.api.filter_params import parse_metadata_filters
 from app.config.settings import settings
 from app.services.chat_service import ChatRequest, ChatService
 
@@ -18,11 +19,12 @@ _service = ChatService()
 class ChatRequestBody(BaseModel):
     query: str
     space_id: str
-    session_id: str | None = None   # 提供时启用三层记忆
+    session_id: str | None = None  # 提供时启用三层记忆
     history: list[dict] = []
     top_k: int = 10
     score_threshold: float = 0.5
-    model: str | None = None        # 请求级模型覆盖，优先于租户配置
+    model: str | None = None  # 请求级模型覆盖，优先于租户配置
+    metadata_filters: list[dict] = []  # 通用元数据过滤条件 [{key, operator, value}]
 
 
 async def _sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
@@ -66,6 +68,7 @@ async def chat(
         top_k=body.top_k,
         score_threshold=body.score_threshold,
         model=body.model,
+        metadata_filters=parse_metadata_filters(body.metadata_filters),
         llm_provider_name=settings.llm_fallback_provider or "openai_llm",
         embedding_provider_name="openai_embedding",
     )

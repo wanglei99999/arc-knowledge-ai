@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator
 
+from app.domain.metadata_filter import MetadataFilter
 from app.memory.assembler import ContextAssembler
 from app.memory.extractor import MemoryExtractor
 from app.memory.manager import MemoryManager
@@ -16,14 +17,17 @@ from app.workflows.rag_orchestrator import RAGOrchestrator
 logger = logging.getLogger(__name__)
 
 _orchestrator = RAGOrchestrator()
-_manager      = MemoryManager()
-_assembler    = ContextAssembler()
-_extractor    = MemoryExtractor()
+_manager = MemoryManager()
+_assembler = ContextAssembler()
+_extractor = MemoryExtractor()
 
 _FAKE_QUOTA = QuotaSnapshot(
-    max_documents=10000, max_storage_bytes=10 * 1024 ** 3,
-    max_api_calls_per_day=100000, used_documents=0,
-    used_storage_bytes=0, used_api_calls_today=0,
+    max_documents=10000,
+    max_storage_bytes=10 * 1024**3,
+    max_api_calls_per_day=100000,
+    used_documents=0,
+    used_storage_bytes=0,
+    used_api_calls_today=0,
 )
 
 
@@ -32,14 +36,15 @@ class ChatRequest:
     query: str
     tenant_id: str
     space_id: str
-    user_id: str | None = None           # require_user() 填入
-    session_id: str | None = None        # 有 session 时启用三层记忆
+    user_id: str | None = None  # require_user() 填入
+    session_id: str | None = None  # 有 session 时启用三层记忆
     llm_provider_name: str = "openai_llm"
     embedding_provider_name: str = "openai_embedding"
-    history: list[dict] = field(default_factory=list)   # 无 session 时的后备历史
+    history: list[dict] = field(default_factory=list)  # 无 session 时的后备历史
     top_k: int = 10
     score_threshold: float = 0.5
-    model: str | None = None             # 请求级模型覆盖（优先于租户配置）
+    model: str | None = None  # 请求级模型覆盖（优先于租户配置）
+    metadata_filters: list[MetadataFilter] = field(default_factory=list)  # 通用元数据过滤
 
 
 class ChatService:
@@ -63,13 +68,13 @@ class ChatService:
         chunk_map = {c["chunk_id"]: c for c in rag_result.chunks}
         return [
             {
-                "doc_id":      h.document_id,
-                "chunk_id":    h.chunk_id,
-                "doc_name":    chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
+                "doc_id": h.document_id,
+                "chunk_id": h.chunk_id,
+                "doc_name": chunk_map.get(h.chunk_id, {}).get("original_name") or h.document_id,
                 "chunk_index": h.chunk_index,
-                "content":     chunk_map.get(h.chunk_id, {}).get("content", ""),
-                "score":       round(h.score, 4),
-                "source":      h.source,
+                "content": chunk_map.get(h.chunk_id, {}).get("content", ""),
+                "score": round(h.score, 4),
+                "source": h.source,
             }
             for h in rag_result.hits
             if h.chunk_id in chunk_map
@@ -104,6 +109,7 @@ class ChatService:
                 top_k=req.top_k,
                 score_threshold=req.score_threshold,
                 model=req.model,
+                metadata_filters=req.metadata_filters,
             ),
         )
 
@@ -161,5 +167,6 @@ class ChatService:
             top_k=req.top_k,
             score_threshold=req.score_threshold,
             model=req.model,
+            metadata_filters=req.metadata_filters,
         ):
             yield item
