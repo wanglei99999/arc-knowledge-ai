@@ -153,6 +153,7 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
             "content": c.content,
             "chunk_index": c.chunk_index,
             "token_count": c.token_count,
+            #一个是chunk级的metadata，一个是文档级的metadata
             "metadata": {**c.metadata, **(inp.metadata or {})},
         }
         for c in chunks
