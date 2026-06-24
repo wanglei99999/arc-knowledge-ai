@@ -9,9 +9,6 @@ from app.domain.metadata_filter import MetadataFilter
 from app.memory.assembler import ContextAssembler
 from app.memory.extractor import MemoryExtractor
 from app.memory.manager import MemoryManager
-from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
-from app.pipeline.core.registry import registry
-from app.providers.base import LLMProvider
 from app.workflows.rag_orchestrator import RAGOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -20,15 +17,6 @@ _orchestrator = RAGOrchestrator()
 _manager = MemoryManager()
 _assembler = ContextAssembler()
 _extractor = MemoryExtractor()
-
-_FAKE_QUOTA = QuotaSnapshot(
-    max_documents=10000,
-    max_storage_bytes=10 * 1024**3,
-    max_api_calls_per_day=100000,
-    used_documents=0,
-    used_storage_bytes=0,
-    used_api_calls_today=0,
-)
 
 
 @dataclass
@@ -113,8 +101,8 @@ class ChatService:
             ),
         )
 
-        # 3. 获取 LLM Provider
-        llm: LLMProvider = registry.get_provider(req.llm_provider_name)
+        # 3. 经 ModelHub 获取 LLM（熔断降级 + allowed_models 校验，主模型取自租户配置）
+        ctx, llm = await _orchestrator.build_llm(req.tenant_id, req.model)
         context_window = llm.get_context_window()
 
         # 4. 组装 context
@@ -125,13 +113,7 @@ class ChatService:
             rag_text=rag_result.context_text,
         )
 
-        # 5. 流式生成，同步收集完整响应
-        ctx = ProcessingContext.create(
-            tenant_id=req.tenant_id,
-            document_id="",
-            quota=_FAKE_QUOTA,
-            config=TenantConfig(tenant_id=req.tenant_id),
-        )
+        # 5. 流式生成，同步收集完整响应（ctx 由 build_llm 构建，含真实租户配置）
         response_parts: list[str] = []
         async for token in llm.stream_generate(ctx, messages):
             response_parts.append(token)

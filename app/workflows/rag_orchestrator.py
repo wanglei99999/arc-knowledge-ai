@@ -60,6 +60,20 @@ class RAGOrchestrator:
     def _get_llm_provider(self, ctx: ProcessingContext) -> LLMProvider:
         return model_hub.get_provider(ctx)
 
+    async def build_llm(
+        self, tenant_id: str, model: str | None = None
+    ) -> tuple[ProcessingContext, LLMProvider]:
+        """加载租户配置 → 构建 ctx → 经 ModelHub 取带熔断/校验的 LLM。
+
+        LLM 选择的唯一入口：检索生成与记忆链路共用，主模型取自租户配置
+        （非 fallback 备胎），避免 provider 选择逻辑在多处漂移。
+        """
+        config = await self._tenant_config_svc.get_or_default(tenant_id)
+        if model:
+            config = dataclasses.replace(config, default_llm_model=model)
+        ctx = self._make_ctx(tenant_id, config)
+        return ctx, self._get_llm_provider(ctx)
+
     async def retrieve(
         self,
         query_text: str,
@@ -108,12 +122,8 @@ class RAGOrchestrator:
         model: str | None = None,
     ) -> str:
         """非流式生成（用于测试 / 批处理）。"""
-        config = await self._tenant_config_svc.get_or_default(tenant_id)
-        if model:
-            config = dataclasses.replace(config, default_llm_model=model)
-        ctx = self._make_ctx(tenant_id, config)
+        ctx, provider = await self.build_llm(tenant_id, model)
         messages = self._build_messages(result, history)
-        provider = self._get_llm_provider(ctx)
         return await provider.generate(ctx, messages)
 
     async def stream_generate(
@@ -124,12 +134,8 @@ class RAGOrchestrator:
         model: str | None = None,
     ) -> AsyncIterator[str]:
         """流式生成，yield token，供 SSE 推送。"""
-        config = await self._tenant_config_svc.get_or_default(tenant_id)
-        if model:
-            config = dataclasses.replace(config, default_llm_model=model)
-        ctx = self._make_ctx(tenant_id, config)
+        ctx, provider = await self.build_llm(tenant_id, model)
         messages = self._build_messages(result, history)
-        provider = self._get_llm_provider(ctx)
         async for token in provider.stream_generate(ctx, messages):
             yield token
 
