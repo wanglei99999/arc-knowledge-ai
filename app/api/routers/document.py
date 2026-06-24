@@ -86,6 +86,7 @@ async def upload_document(
         file_size=len(data),
     )
 
+    #我们在这里的设计上是，matadata存在于chunk中，而不是落在document中，所以，创建document的时候是不带matadata的
     req = IngestRequest(
         tenant_id=x_tenant_id,
         space_id=space_id,
