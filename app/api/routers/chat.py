@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from app.api.dependencies import UserContext, require_user
 from app.api.filter_params import parse_metadata_filters
-from app.config.settings import settings
 from app.services.chat_service import ChatRequest, ChatService
 
 router = APIRouter(prefix="/chat", tags=["rag"])
@@ -69,7 +68,6 @@ async def chat(
         score_threshold=body.score_threshold,
         model=body.model,
         metadata_filters=parse_metadata_filters(body.metadata_filters),
-        llm_provider_name=settings.llm_fallback_provider or "openai_llm",
         embedding_provider_name="openai_embedding",
     )
     token_stream = _service.stream_chat(req)
