@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.api.dependencies import require_tenant
 from app.infrastructure.minio.client import build_object_key, upload_file
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.services.document_service import DeleteResult, DocumentService, IngestRequest
@@ -52,7 +53,7 @@ async def upload_document(
     file: UploadFile,
     space_id: str,
     metadata: str | None = None,
-    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    tenant_id: str = Depends(require_tenant),
 ) -> UploadResponse:
     """
     接收文件上传，写入 MinIO（Phase 1 实现），触发 Temporal Workflow。
@@ -71,14 +72,14 @@ async def upload_document(
 
     document_id = str(uuid.uuid4())
     data = await file.read()
-    object_key = build_object_key(x_tenant_id, space_id, document_id, file.filename)
+    object_key = build_object_key(tenant_id, space_id, document_id, file.filename)
     await upload_file(data, object_key, content_type=mime_type)
 
     # 创建 documents 记录（对应架构中 arc-knowledge 控制面的职责，MVP 阶段由 Python API 代劳）
     repo = ChunkRepository()
     await repo.create_document(
         document_id=document_id,
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         space_id=space_id,
         original_name=file.filename,
         mime_type=mime_type,
@@ -86,9 +87,10 @@ async def upload_document(
         file_size=len(data),
     )
 
-    #我们在这里的设计上是，matadata存在于chunk中，而不是落在document中，所以，创建document的时候是不带matadata的
+    # 我们在这里的设计上是，matadata 存在于 chunk 中，而不是落在 document 中，
+    # 所以创建 document 的时候是不带 matadata 的
     req = IngestRequest(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         space_id=space_id,
         file_path=object_key,
         mime_type=mime_type,
@@ -112,9 +114,12 @@ async def upload_document(
 )
 async def get_document_status(
     document_id: str,
-    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    tenant_id: str = Depends(require_tenant),
 ) -> StatusResponse:
-    data = await _service.get_status(document_id)
+    try:
+        data = await _service.get_status(document_id, tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     return StatusResponse(**data)
 
 
@@ -126,9 +131,9 @@ async def list_documents(
     space_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    tenant_id: str = Depends(require_tenant),
 ) -> dict:
-    return await _service.list_documents(x_tenant_id, space_id, limit, offset)
+    return await _service.list_documents(tenant_id, space_id, limit, offset)
 
 
 @router.get(
@@ -137,12 +142,12 @@ async def list_documents(
 )
 async def list_chunks(
     document_id: str,
-    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    tenant_id: str = Depends(require_tenant),
 ) -> dict:
     from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 
     repo = ChunkRepository()
-    chunks = await repo.get_chunks_by_document(document_id, x_tenant_id)
+    chunks = await repo.get_chunks_by_document(document_id, tenant_id)
     return {"items": chunks, "total": len(chunks)}
 
 
@@ -154,7 +159,7 @@ async def list_chunks(
 )
 async def delete_document(
     document_id: str,
-    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    tenant_id: str = Depends(require_tenant),
 ) -> DeleteResult:
     """
     删除指定文档：
@@ -162,7 +167,7 @@ async def delete_document(
     - MinIO 原始文件、Milvus 向量、ES 索引、PG chunks 全部物理删除
     """
     try:
-        return await _service.delete(document_id, x_tenant_id)
+        return await _service.delete(document_id, tenant_id)
     except ValueError as e:
         raise HTTPException(
             status_code=(
