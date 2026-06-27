@@ -92,8 +92,12 @@ class DocumentService:
             workflow_run_id=handle.run_id,
         )
 
-    async def get_status(self, document_id: str) -> dict:
-        """查询 Workflow 执行状态"""
+    async def get_status(self, document_id: str, tenant_id: str) -> dict:
+        """查询 Workflow 执行状态（先校验文档归属该租户，防跨租户 IDOR）"""
+        repo = ChunkRepository()
+        meta = await repo.get_document_meta(document_id, tenant_id)
+        if meta is None:
+            raise ValueError(f"Document {document_id} not found")
         client = await self._get_temporal_client()
         handle = client.get_workflow_handle(f"ingest-{document_id}")
         desc = await handle.describe()
