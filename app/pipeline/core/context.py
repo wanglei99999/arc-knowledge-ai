@@ -25,7 +25,8 @@ class QuotaSnapshot:
         return self.used_api_calls_today < self.max_api_calls_per_day
 
     def has_storage_quota(self, needed_bytes: int = 0) -> bool:
-        return self.used_storage_bytes + needed_bytes <= self.max_storage_bytes
+        # 与 has_api_quota / has_spend_quota 一致：used 达到上限即视为耗尽（严格 <）
+        return self.used_storage_bytes + needed_bytes < self.max_storage_bytes
 
     def has_spend_quota(self) -> bool:
         if self.max_spend_per_day <= 0:
