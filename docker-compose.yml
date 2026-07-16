@@ -216,6 +216,18 @@ services:
       timeout: 10s
       retries: 5
 
+  # ── Trace 后端（Phoenix）─────────────────────────────────────────────────────
+  # 接收 OTLP span（应用 settings.otlp_endpoint 默认指向 4317），UI 看瀑布图。
+  # 版本锁死，禁用 latest（防 API 漂移，理由同 RAGAS）。
+  phoenix:
+    image: arizephoenix/phoenix:version-18.0.0
+    ports:
+      - "6006:6006"    # UI + OTLP/HTTP
+      - "4317:4317"    # OTLP/gRPC
+    volumes:
+      - phoenix_data:/mnt/data    # SQLite 落盘，重启不丢 trace
+    restart: unless-stopped
+
 
 volumes:
   postgres_data:
@@ -228,3 +240,4 @@ volumes:
   grafana_data:
   paddleocr_models:
   mineru_models:
+  phoenix_data:
