@@ -50,12 +50,12 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "arc-ingestion"
 
     # ── LLM 服务（OpenAI 兼容接口）───────────────────────────────────────────
-    openai_base_url: str = "https://api.openai.com/v1"   # LLM 服务地址
+    openai_base_url: str = "https://api.openai.com/v1"  # LLM 服务地址
     openai_api_key: str = Field(default="", repr=False)
     openai_llm_model: str = "gpt-4o-mini"
 
     # ── Embedding 服务（OpenAI 兼容接口，可与 LLM 分开部署）─────────────────
-    openai_embedding_base_url: str = ""          # 留空则复用 openai_base_url
+    openai_embedding_base_url: str = ""  # 留空则复用 openai_base_url
     openai_embedding_api_key: str = Field(default="", repr=False)  # 留空则复用 openai_api_key
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_batch_size: int = 10
@@ -67,41 +67,40 @@ class Settings(BaseSettings):
     # ── JWT 认证 ──────────────────────────────────────────────────────────────
     jwt_secret: str = Field(default="change-me-in-production", repr=False)
     jwt_algorithm: str = "HS256"
-    jwt_access_expire_minutes: int = 60  #access token默认1小时
-    jwt_refresh_expire_days: int = 7 #refresh token 7天
-
+    jwt_access_expire_minutes: int = 60  # access token默认1小时
+    jwt_refresh_expire_days: int = 7  # refresh token 7天
 
     # ── OpenTelemetry ─────────────────────────────────────────────────────────
     otel_enabled: bool = True
     otel_service_name: str = "arc-knowledge-ai"
-    otlp_endpoint: str = "http://localhost:4317"  # Jaeger / Tempo gRPC 端点
+    otlp_endpoint: str = "http://localhost:4317"  # Phoenix OTLP gRPC 端点（也兼容 Jaeger/Tempo）
 
     # ── ModelHub / 熔断降级 ───────────────────────────────────────────────────
-    llm_fallback_provider: str = "ollama_llm"   # 主模型失败时切换的备用 Provider
-    llm_max_retries: int = 3                    # tenacity 最大重试次数
-    llm_retry_min_wait: float = 1.0             # 最小等待秒数
-    llm_retry_max_wait: float = 10.0            # 最大等待秒数
+    llm_fallback_provider: str = "ollama_llm"  # 主模型失败时切换的备用 Provider
+    llm_max_retries: int = 3  # tenacity 最大重试次数
+    llm_retry_min_wait: float = 1.0  # 最小等待秒数
+    llm_retry_max_wait: float = 10.0  # 最大等待秒数
 
     # ── 记忆系统（Phase 7）────────────────────────────────────────────────────
-    memory_last_n: int = 10                        # 工作记忆保留的最近消息数
-    memory_top_k: int = 5                          # 语义记忆检索 top-k
-    memory_similarity_threshold: float = 0.6       # 语义记忆搜索最低相似度
-    memory_update_threshold: float = 0.9           # >= 此相似度时更新而非新增
-    ollama_context_window: int = 8192              # Ollama 模型上下文窗口大小
+    memory_last_n: int = 10  # 工作记忆保留的最近消息数
+    memory_top_k: int = 5  # 语义记忆检索 top-k
+    memory_similarity_threshold: float = 0.6  # 语义记忆搜索最低相似度
+    memory_update_threshold: float = 0.9  # >= 此相似度时更新而非新增
+    ollama_context_window: int = 8192  # Ollama 模型上下文窗口大小
 
     # ── Rate Limiting ─────────────────────────────────────────────────────────
     rate_limit_enabled: bool = True
-    rate_limit_per_minute: int = 60   # 每个租户每分钟最大请求数
+    rate_limit_per_minute: int = 60  # 每个租户每分钟最大请求数
 
     # ── HuggingFace / 本地模型（bge_rerank provider 专用）────────────────────
     hf_endpoint: str = "https://hf-mirror.com"  # 镜像站（国内加速）
-    reranker_offline: bool = True               # True=只用本地缓存；False=允许联网下载
-    reranker_model_path: str = ""               # 留空则用 HuggingFace model id；填本地目录路径则直接加载
+    reranker_offline: bool = True  # True=只用本地缓存；False=允许联网下载
+    reranker_model_path: str = ""  # 留空则用 HuggingFace model id；填本地目录路径则直接加载
 
     # ── Tokenizer（精确 token 计数）──────────────────────────────────────────
-    tokenizer_model: str = "Qwen/Qwen3-8B"     # HuggingFace model id 或本地路径
-    llm_context_window: int = 32768             # LLM 最大上下文 token 数
-    llm_context_reserved: int = 4096           # 为 system 模板 + 历史 + 生成预留的 token 数
+    tokenizer_model: str = "Qwen/Qwen3-8B"  # HuggingFace model id 或本地路径
+    llm_context_window: int = 32768  # LLM 最大上下文 token 数
+    llm_context_reserved: int = 4096  # 为 system 模板 + 历史 + 生成预留的 token 数
 
     # ── Infinity 推理服务（infinity_rerank provider 专用）────────────────────
     infinity_base_url: str = "http://localhost:7997"
@@ -113,13 +112,17 @@ class Settings(BaseSettings):
     # ── 文档解析服务（mineru_parser provider 专用）────────────────────────────
     mineru_service_url: str = "http://localhost:7999"
     mineru_lang_list: list[str] = Field(default=["ch"])
-    mineru_backend: str = "hybrid-auto-engine"             # pipeline/hybrid-auto-engine/hybrid-http-client/vlm-auto-engine/vlm-http-client
-    mineru_server_url: str = ""                            # hybrid-http-client/vlm-http-client 时填 openai-compatible server URL
+    mineru_backend: str = (
+        "hybrid-auto-engine"  # pipeline/hybrid-auto-engine/hybrid-http-client/vlm-auto-engine/vlm-http-client
+    )
+    mineru_server_url: str = (
+        ""  # hybrid-http-client/vlm-http-client 时填 openai-compatible server URL
+    )
 
     # ── Semantic Cache ────────────────────────────────────────────────────────
     semantic_cache_enabled: bool = True
-    semantic_cache_threshold: float = 0.90          # 余弦相似度命中阈值
-    semantic_cache_ttl_seconds: int = 14400         # 4 小时基础 TTL
+    semantic_cache_threshold: float = 0.90  # 余弦相似度命中阈值
+    semantic_cache_ttl_seconds: int = 14400  # 4 小时基础 TTL
     semantic_cache_embedding_provider: str = "openai_embedding"
 
     # ── Nacos（可选）──────────────────────────────────────────────────────────
