@@ -7,6 +7,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.middleware.rate_limit import RateLimitMiddleware
@@ -38,6 +39,7 @@ def _register_components() -> None:
     import app.providers.parser.paddleocr_provider  # noqa: F401
     import app.providers.parser.smart_parser_provider  # noqa: F401
     import app.providers.parser.unstructured_provider  # noqa: F401
+
     # ── Retrieval / RAG ──────────────────────────────────────────────────────
     import app.pipeline.stages.retrieval.keyword_search_stage  # noqa: F401
     import app.pipeline.stages.retrieval.query_rewrite_stage  # noqa: F401
@@ -47,7 +49,7 @@ def _register_components() -> None:
     import app.pipeline.strategies.retrieval.hybrid_strategy  # noqa: F401
     import app.providers.llm.ollama_llm  # noqa: F401
     import app.providers.llm.openai_llm  # noqa: F401
-    import app.providers.rerank.bge_rerank      # noqa: F401
+    import app.providers.rerank.bge_rerank  # noqa: F401
     import app.providers.rerank.infinity_rerank  # noqa: F401
 
 
@@ -79,13 +81,18 @@ app = FastAPI(
     docs_url="/docs" if settings.app_env != "production" else None,
 )
 
-app.add_middleware(RateLimitMiddleware)   # 内层：CORS 之后执行
+app.add_middleware(RateLimitMiddleware)  # 内层：CORS 之后执行
 app.add_middleware(
-    CORSMiddleware,                        # 外层：最先执行，处理 OPTIONS 预检
+    CORSMiddleware,  # 外层：最先执行，处理 OPTIONS 预检
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# HTTP 根 span：每个请求一个 SERVER span（如 "POST /chat"），
+# 管线/LLM 的子 span 自动挂其下。span 在请求时才产生，此处注册不依赖 provider 就绪。
+if settings.otel_enabled:
+    FastAPIInstrumentor.instrument_app(app)
 
 # 注册路由
 app.include_router(auth.router)
