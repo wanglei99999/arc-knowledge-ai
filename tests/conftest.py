@@ -13,6 +13,12 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import pytest
+from opentelemetry import trace as _otel_trace
+from opentelemetry.sdk.trace import TracerProvider as _TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter as _InMemorySpanExporter,
+)
 
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 
@@ -53,13 +59,6 @@ def fake_ctx(tenant_config: TenantConfig, quota: QuotaSnapshot) -> ProcessingCon
 # ── OTel 测试底座 ─────────────────────────────────────────────────────────────
 # 全局 TracerProvider 一个进程只能 set 一次，故放在 conftest 模块级（import 时执行）。
 # SimpleSpanProcessor 同步导出到内存，测试里 span 立等可取——不需要 Phoenix、不发网络。
-from opentelemetry import trace as _otel_trace
-from opentelemetry.sdk.trace import TracerProvider as _TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
-    InMemorySpanExporter as _InMemorySpanExporter,
-)
-
 _SPAN_EXPORTER = _InMemorySpanExporter()
 _test_provider = _TracerProvider()
 _test_provider.add_span_processor(_SimpleSpanProcessor(_SPAN_EXPORTER))
