@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.pipeline.core.context import TenantConfig
 from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
+from app.pipeline.hooks.observability_hook import ObservabilityHook
 from app.pipeline.strategies.base_strategy import BaseStrategy
 
 
@@ -18,7 +19,7 @@ class HybridRetrievalStrategy(BaseStrategy):
     """
 
     strategy_id = "hybrid"
-    hooks: list = []    # Phase 3 开启 ObservabilityHook
+    hooks = [ObservabilityHook]  # 检索链路的 trace 骨架:每 Stage 一个 span
 
     def build_pipeline(self, doc_type: str, config: TenantConfig) -> Pipeline:
         return (
