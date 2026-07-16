@@ -63,8 +63,15 @@ class ObservabilityHook(BaseHook):
             )
 
         elif event.phase == Phase.PRE_STAGE and event.stage:
+            # 显式认爹:start_span 不会自动挂父子,必须把 pipeline span 递进去,
+            # 否则 stage span 全是孤儿,trace 后端里不成树。
+            parent_span = ctx.metadata.get(_PIPELINE_SPAN_KEY)
+            parent_context = (
+                otel_trace.set_span_in_context(parent_span) if parent_span is not None else None
+            )
             span = _tracer.start_span(
                 f"stage.{event.stage.name}",
+                context=parent_context,
                 attributes={
                     "stage": event.stage.name,
                     "tenant_id": ctx.tenant_id,

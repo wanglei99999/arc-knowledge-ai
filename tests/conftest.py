@@ -4,6 +4,7 @@ pytest 全局 fixtures。
 单元测试只需要 fake_ctx，不启动任何外部依赖。
 集成测试在 tests/integration/conftest.py 里另外定义真实 DB fixtures。
 """
+
 import os
 
 # 单元测试隔离外部依赖：禁止 transformers 联网下载 tokenizer。
@@ -47,3 +48,26 @@ def fake_ctx(tenant_config: TenantConfig, quota: QuotaSnapshot) -> ProcessingCon
         quota=quota,
         config=tenant_config,
     )
+
+
+# ── OTel 测试底座 ─────────────────────────────────────────────────────────────
+# 全局 TracerProvider 一个进程只能 set 一次，故放在 conftest 模块级（import 时执行）。
+# SimpleSpanProcessor 同步导出到内存，测试里 span 立等可取——不需要 Phoenix、不发网络。
+from opentelemetry import trace as _otel_trace
+from opentelemetry.sdk.trace import TracerProvider as _TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter as _InMemorySpanExporter,
+)
+
+_SPAN_EXPORTER = _InMemorySpanExporter()
+_test_provider = _TracerProvider()
+_test_provider.add_span_processor(_SimpleSpanProcessor(_SPAN_EXPORTER))
+_otel_trace.set_tracer_provider(_test_provider)
+
+
+@pytest.fixture
+def span_exporter() -> _InMemorySpanExporter:
+    """每个测试拿到清空后的内存导出器，断言 span 树形与属性用。"""
+    _SPAN_EXPORTER.clear()
+    return _SPAN_EXPORTER
