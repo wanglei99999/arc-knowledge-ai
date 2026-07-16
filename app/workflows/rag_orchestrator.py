@@ -91,7 +91,8 @@ class RAGOrchestrator:
         ctx = self._make_ctx(tenant_id, config)
 
         strategy = registry.get_strategy(config.retrieval_strategy)
-        pipeline = strategy.build_pipeline("query", config)
+        # with_hooks 版本:否则 strategy.hooks 声明形同虚设,检索链路无 trace
+        pipeline = strategy.build_pipeline_with_hooks("query", config)
 
         query = RetrievalQuery(
             query_text=query_text,
