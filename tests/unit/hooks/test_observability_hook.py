@@ -39,3 +39,44 @@ async def test_stage_spans_are_children_of_pipeline_span(fake_ctx, span_exporter
         assert spans[name].parent is not None, f"{name} 没有父 span"
         assert spans[name].parent.span_id == root.context.span_id
         assert spans[name].context.trace_id == root.context.trace_id
+
+
+from app.domain.retrieval import RetrievalQuery, SearchContext, SearchHit
+
+
+class _Vectorish(BaseStage[SearchContext, SearchContext]):
+    name = "vector_search"  # 与真实 stage 同名,触发 RetrievalExtractor
+
+    async def _execute(self, ctx: ProcessingContext, input: SearchContext) -> SearchContext:
+        input.vector_hits.append(
+            SearchHit(chunk_id="c1", document_id="d1", chunk_index=0, score=0.9, source="vector")
+        )
+        return input
+
+
+async def test_extractor_attrs_land_on_stage_span(fake_ctx, span_exporter):
+    """T6:extractor 翻译出的属性必须真的挂到对应 stage span 上。"""
+    sc = SearchContext(query=RetrievalQuery(query_text="q", tenant_id="t"))
+    pipeline = Pipeline(stages=[_Vectorish()], hooks=[ObservabilityHook()])
+    await pipeline.run(fake_ctx, sc)
+
+    span = {s.name: s for s in span_exporter.get_finished_spans()}["stage.vector_search"]
+    assert span.attributes["openinference.span.kind"] == "RETRIEVER"
+    assert span.attributes["retrieval.documents.0.document.id"] == "c1"
+
+
+async def test_exploding_extractor_does_not_break_pipeline(fake_ctx, span_exporter, monkeypatch):
+    """观测铁律:翻译官抛异常,业务管线照常出结果。"""
+    import app.pipeline.hooks.observability_hook as hook_mod
+
+    class _Bomb:
+        def matches(self, stage_name, payload):
+            raise RuntimeError("boom")
+
+        def extract(self, stage_name, payload):
+            return {}
+
+    monkeypatch.setattr(hook_mod, "EXTRACTORS", [_Bomb()])
+    pipeline = Pipeline(stages=[_EchoA()], hooks=[ObservabilityHook()])
+    result = await pipeline.run(fake_ctx, "ok")
+    assert result == "ok"  # 业务无感
