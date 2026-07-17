@@ -13,6 +13,7 @@ from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
+from app.pipeline.hooks.observability_hook import ObservabilityHook
 from app.providers.base import ParsedDocument
 
 
@@ -189,6 +190,7 @@ async def embed_and_index_activity(inp: IngestionInput, chunk_dicts: list[dict])
         Pipeline.start(registry.get_stage("embedder"))
         .then(registry.get_stage("milvus_indexer"))
         .then(registry.get_stage("es_indexer"))
+        .with_hooks([ObservabilityHook()])
     )
 
     try:
