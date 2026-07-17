@@ -41,7 +41,7 @@ class Pipeline(Generic[TInput, TOutput]):
 
             try:
                 current = await stage.execute(ctx, current)
-                await self._hook_runner.fire(Phase.POST_STAGE, ctx, stage=stage)
+                await self._hook_runner.fire(Phase.POST_STAGE, ctx, stage=stage, payload=current)
             except Exception as e:
                 await self._hook_runner.fire(Phase.ON_ERROR, ctx, stage=stage, error=e)
                 raise
