@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 
 from app.config.settings import settings
 from app.domain.document import DocumentStatus
@@ -57,7 +58,8 @@ class DocumentService:
     """
 
     async def _get_temporal_client(self) -> Client:
-        return await Client.connect(settings.temporal_host)
+        interceptors = [TracingInterceptor()] if settings.otel_enabled else []
+        return await Client.connect(settings.temporal_host, interceptors=interceptors)
 
     async def ingest(self, req: IngestRequest) -> IngestResult:
         document_id = req.document_id or str(uuid.uuid4())

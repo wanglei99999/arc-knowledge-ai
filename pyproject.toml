@@ -23,7 +23,7 @@ dependencies = [
     # 对象存储
     "boto3>=1.34",
     # 工作流
-    "temporalio>=1.7",
+    "temporalio[opentelemetry]>=1.7",
     # 文档解析
     "unstructured[all-docs]>=0.14",
     # OpenAI / 兼容接口

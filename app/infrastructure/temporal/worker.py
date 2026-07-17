@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.worker import Worker
 
 from app.config.settings import settings
@@ -39,7 +40,8 @@ async def run_worker() -> None:
     import app.providers.parser.smart_parser_provider  # noqa: F401
     import app.providers.parser.unstructured_provider  # noqa: F401
 
-    client = await Client.connect(settings.temporal_host)
+    interceptors = [TracingInterceptor()] if settings.otel_enabled else []
+    client = await Client.connect(settings.temporal_host, interceptors=interceptors)
 
     worker = Worker(
         client,
