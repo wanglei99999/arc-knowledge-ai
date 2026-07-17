@@ -5,10 +5,13 @@ import dataclasses
 import uuid
 from collections.abc import AsyncIterator
 
+from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
+from app.infrastructure.telemetry.otel import get_tracer
+from app.infrastructure.telemetry.spans import traced_block
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
@@ -107,7 +110,17 @@ class RAGOrchestrator:
 
         # 从 PostgreSQL 拉取 chunk 文本
         chunk_ids = [h.chunk_id for h in hits]
-        chunks = await self._chunk_repo.get_chunks_by_ids(chunk_ids, tenant_id)
+        with traced_block("chunk.fetch") as span:
+            chunks = await self._chunk_repo.get_chunks_by_ids(chunk_ids, tenant_id)
+            span.set_attribute("arc.chunk.count", len(chunks))
+            if settings.otel_capture_content:
+                limit = settings.otel_content_max_chars
+                for i, c in enumerate(chunks[:10]):
+                    span.set_attribute(f"retrieval.documents.{i}.document.id", c["chunk_id"])
+                    span.set_attribute(
+                        f"retrieval.documents.{i}.document.content",
+                        (c.get("content") or "")[:limit],
+                    )
 
         return RetrievalResult(
             query_text=query_text,
@@ -157,44 +170,58 @@ class RAGOrchestrator:
         history 为空（首轮）时走缓存路径；有历史记录时直接走 RAG，
         避免多轮上下文污染缓存答案。
         """
-        # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
-        # 否则同一 query 不同过滤条件会命中错误的缓存答案。
-        use_cache = not history and not metadata_filters
-        if use_cache:
-            cached = await _cache.get(query, tenant_id, space_id)
-            if cached:
-                yield cached.answer
-                if cached.citations:
-                    yield cached.citations
-                return
+        # rag.chat 根 span：手动管理生命周期（流式生成器横跨多次 yield，
+        # 不设为 current 上下文以免上下文泄漏；子节点靠 FastAPI 根 span 归入同一 trace）。
+        span = get_tracer("arc.rag").start_span("rag.chat")
+        span.set_attribute("openinference.span.kind", "CHAIN")
+        span.set_attribute("arc.tenant_id", tenant_id)
+        if settings.otel_capture_content:
+            span.set_attribute("input.value", query)
+        try:
+            # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
+            # 否则同一 query 不同过滤条件会命中错误的缓存答案。
+            use_cache = not history and not metadata_filters
+            if use_cache:
+                with traced_block("cache.lookup") as cache_span:
+                    cached = await _cache.get(query, tenant_id, space_id)
+                    cache_span.set_attribute("arc.cache.hit", cached is not None)
+                if cached:
+                    yield cached.answer
+                    if cached.citations:
+                        yield cached.citations
+                    return
 
-        result = await self.retrieve(
-            query_text=query,
-            tenant_id=tenant_id,
-            space_id=space_id,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            model=model,
-            metadata_filters=metadata_filters,
-        )
-        history_messages = [ChatMessage(role=m["role"], content=m["content"]) for m in history]
+            result = await self.retrieve(
+                query_text=query,
+                tenant_id=tenant_id,
+                space_id=space_id,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                model=model,
+                metadata_filters=metadata_filters,
+            )
+            history_messages = [ChatMessage(role=m["role"], content=m["content"]) for m in history]
 
-        tokens: list[str] = []
-        async for token in self.stream_generate(
-            result=result,
-            history=history_messages,
-            tenant_id=tenant_id,
-            model=model,
-        ):
-            tokens.append(token)
-            yield token
+            tokens: list[str] = []
+            async for token in self.stream_generate(
+                result=result,
+                history=history_messages,
+                tenant_id=tenant_id,
+                model=model,
+            ):
+                tokens.append(token)
+                yield token
 
-        citations = self._build_citations(result)
-        if citations:
-            yield citations
+            citations = self._build_citations(result)
+            if citations:
+                yield citations
 
-        if use_cache:
-            asyncio.create_task(_cache.set(query, "".join(tokens), citations, tenant_id, space_id))
+            if use_cache:
+                asyncio.create_task(
+                    _cache.set(query, "".join(tokens), citations, tenant_id, space_id)
+                )
+        finally:
+            span.end()
 
     @staticmethod
     def _build_citations(result: RetrievalResult) -> list[dict]:
@@ -218,8 +245,6 @@ class RAGOrchestrator:
         result: RetrievalResult,
         history: list[ChatMessage],
     ) -> list[ChatMessage]:
-        from app.config.settings import settings
-
         # 计算可用于 chunk context 的 token 预算
         history_tokens = sum(count_tokens(m.content) for m in history)
         query_tokens = count_tokens(result.query_text)
