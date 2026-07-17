@@ -6,6 +6,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.config.settings import settings
+from app.infrastructure.telemetry.otel import setup_tracing
 from app.workflows.ingestion_activities import (
     chunk_activity,
     embed_and_index_activity,
@@ -14,8 +15,15 @@ from app.workflows.ingestion_activities import (
 from app.workflows.ingestion_workflow import IngestionWorkflow
 
 
+def init_worker_tracing() -> None:
+    """worker 进程自己的 TracerProvider（修复缺陷2：此前 worker 里 span 全是 no-op）。"""
+    if settings.otel_enabled:
+        setup_tracing(f"{settings.otel_service_name}-worker", settings.otlp_endpoint)
+
+
 async def run_worker() -> None:
     """启动 Temporal Worker，监听 ingestion task queue"""
+    init_worker_tracing()
 
     # 触发所有 Stage/Provider/Strategy 注册
     import app.pipeline.stages.chunking.token_chunker  # noqa: F401
