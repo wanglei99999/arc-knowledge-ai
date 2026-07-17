@@ -32,6 +32,7 @@ class HookEvent:
     ctx: ProcessingContext
     stage: "BaseStage | None" = None
     error: Exception | None = None
+    payload: object | None = None  # POST_STAGE 时为该 Stage 的输出，其余 Phase 为 None
 
 
 class BaseHook(ABC):
@@ -66,8 +67,9 @@ class HookRunner:
         ctx: ProcessingContext,
         stage: "BaseStage | None" = None,
         error: Exception | None = None,
+        payload: object | None = None,
     ) -> HookResult:
-        event = HookEvent(phase=phase, ctx=ctx, stage=stage, error=error)
+        event = HookEvent(phase=phase, ctx=ctx, stage=stage, error=error, payload=payload)
         for hook in self.hooks:
             hook_phases = hook.phase if isinstance(hook.phase, list) else [hook.phase]
             if phase not in hook_phases:
