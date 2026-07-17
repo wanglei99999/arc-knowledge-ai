@@ -6,6 +6,7 @@ import time
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import StatusCode
 
+from app.infrastructure.telemetry.extractors import EXTRACTORS
 from app.infrastructure.telemetry.metrics import PIPELINE_TOTAL, STAGE_DURATION
 from app.infrastructure.telemetry.otel import get_tracer
 from app.pipeline.core.hook import BaseHook, HookEvent, HookResult, Phase
@@ -97,6 +98,21 @@ class ObservabilityHook(BaseHook):
                 _STAGE_SPAN_KEY.format(event.stage.name), None
             )
             if span is not None:
+                # 内容收割:extractor 认领 payload 并翻译成属性。
+                # 观测失败不允许影响业务——任何异常吞掉记日志。
+                if event.payload is not None:
+                    for extractor in EXTRACTORS:
+                        try:
+                            if extractor.matches(event.stage.name, event.payload):
+                                span.set_attributes(
+                                    extractor.extract(event.stage.name, event.payload)
+                                )
+                        except Exception:
+                            logger.warning(
+                                "content extractor failed on stage %s",
+                                event.stage.name,
+                                exc_info=True,
+                            )
                 span.end()
 
             logger.info(
