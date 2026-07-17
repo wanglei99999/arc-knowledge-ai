@@ -5,6 +5,7 @@ from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.providers.base import LLMProvider
 from app.providers.llm.resilient_llm import ResilientLLMProvider
+from app.providers.llm.traced_llm import TracedLLMProvider
 
 
 class ModelHub:
@@ -31,11 +32,17 @@ class ModelHub:
 
         primary: LLMProvider = registry.get_provider(primary_id)  # type: ignore[assignment]
 
+        provider: LLMProvider
         if primary_id == fallback_id:
             # 主备相同，不需要熔断包装
-            return primary
+            provider = primary
+        else:
+            provider = ResilientLLMProvider(primary=primary, fallback_provider_id=fallback_id)
 
-        return ResilientLLMProvider(primary=primary, fallback_provider_id=fallback_id)
+        # 观测包装在最外层：熔断降级后的最终结果被如实记录
+        if settings.otel_enabled:
+            provider = TracedLLMProvider(provider)
+        return provider
 
 
 # 全局单例，RAGOrchestrator import 这一个
