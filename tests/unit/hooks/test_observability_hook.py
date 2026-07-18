@@ -117,6 +117,20 @@ async def test_llm_span_nests_under_stage_span(fake_ctx, span_exporter):
     assert spans["stage.llm_stage"].parent.span_id == spans["pipeline.run"].context.span_id
 
 
+async def test_hook_internal_failure_does_not_break_pipeline(fake_ctx, span_exporter, monkeypatch):
+    """观测铁律回归:tracer 本身坏掉(extractor 之外的环节),业务管线照常出结果。"""
+    import app.pipeline.hooks.observability_hook as hook_mod
+
+    class _BrokenTracer:
+        def start_span(self, *args, **kwargs):
+            raise RuntimeError("tracer down")
+
+    monkeypatch.setattr(hook_mod, "_tracer", _BrokenTracer())
+    pipeline = Pipeline(stages=[_EchoA()], hooks=[ObservabilityHook()])
+    result = await pipeline.run(fake_ctx, "ok")
+    assert result == "ok"
+
+
 async def test_context_restored_after_pipeline(fake_ctx, span_exporter):
     """防泄漏回归:pipeline 跑完后,当前上下文必须还原(不残留任何 span)。"""
     from opentelemetry import trace as _trace
