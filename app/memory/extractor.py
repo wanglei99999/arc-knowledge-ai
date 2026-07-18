@@ -9,6 +9,7 @@ MemoryExtractor — LLM 驱动的记忆提取与会话压缩。
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import uuid
@@ -25,6 +26,7 @@ from app.infrastructure.postgres.repositories.session_repo import SessionReposit
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, EmbeddingProvider, LLMProvider
+from app.providers.llm.model_hub import model_hub
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,11 @@ _EXTRACT_PROMPT = """\
 {conversation}"""
 
 
-def _make_ctx(tenant_id: str) -> ProcessingContext:
+def _make_ctx(tenant_id: str, llm_provider: str | None = None) -> ProcessingContext:
     """为提取任务创建最小 ProcessingContext（不经过 Hook 检查）"""
+    config = TenantConfig(tenant_id=tenant_id)
+    if llm_provider:
+        config = dataclasses.replace(config, llm_provider=llm_provider)
     return ProcessingContext(
         tenant_id=tenant_id,
         document_id="",
@@ -62,7 +67,7 @@ def _make_ctx(tenant_id: str) -> ProcessingContext:
             max_documents=0, max_storage_bytes=0, max_api_calls_per_day=999999,
             used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
         ),
-        config=TenantConfig(tenant_id=tenant_id),
+        config=config,
     )
 
 
@@ -120,9 +125,11 @@ class MemoryExtractor:
             if session is None:
                 return
 
-            llm: LLMProvider = registry.get_provider(llm_provider_name)
+            # LLM 走 model_hub 统一入口(与检索生成一致):自动获得 Traced 观测 + Resilient 熔断。
+            # 此前直接 registry 裸取,记忆链路的 LLM 调用既无 span 也无降级——审查发现 #7。
+            ctx = _make_ctx(tenant_id, llm_provider=llm_provider_name)
+            llm: LLMProvider = model_hub.get_provider(ctx)
             embed: EmbeddingProvider = registry.get_provider(embedding_provider_name)
-            ctx = _make_ctx(tenant_id)
 
             # 4. 压缩检查（Layer 2）
             threshold = _compress_threshold(llm.get_context_window())

@@ -4,9 +4,10 @@ import time
 from contextlib import aclosing
 from typing import Any, AsyncIterator
 
-from opentelemetry.trace import StatusCode
+from opentelemetry.trace import Span, StatusCode
 
 from app.config.settings import settings
+from app.infrastructure.telemetry.extractors import KIND_KEY
 from app.infrastructure.telemetry.otel import get_tracer
 from app.pipeline.core.context import ProcessingContext
 from app.providers.base import ChatMessage, HealthStatus, LLMProvider
@@ -14,7 +15,8 @@ from app.utils.tokenizer import count_tokens
 
 _tracer = get_tracer("arc.llm")
 
-_KIND_KEY = "openinference.span.kind"
+# 编排层预计算的 prompt token 数经 ctx.metadata 递入,避免对同一 prompt 二次编码
+PROMPT_TOKENS_KEY = "_llm_prompt_tokens"
 
 
 class TracedLLMProvider(LLMProvider):
@@ -39,7 +41,7 @@ class TracedLLMProvider(LLMProvider):
     @staticmethod
     def _base_attrs(ctx: ProcessingContext, messages: list[ChatMessage]) -> dict[str, Any]:
         attrs: dict[str, Any] = {
-            _KIND_KEY: "LLM",
+            KIND_KEY: "LLM",
             "llm.model_name": ctx.config.default_llm_model or "",
             "arc.tenant_id": ctx.tenant_id,
         }
@@ -50,8 +52,14 @@ class TracedLLMProvider(LLMProvider):
         return attrs
 
     @staticmethod
-    def _finish_attrs(span, messages: list[ChatMessage], completion: str) -> None:
-        prompt_tokens = sum(count_tokens(m.content) for m in messages)
+    def _finish_attrs(
+        span: Span, ctx: ProcessingContext, messages: list[ChatMessage], completion: str
+    ) -> None:
+        # 编排层若已算过 prompt token(预算计算的副产品),直接复用;
+        # 没有(如 query 改写这类短 prompt 场景)才自己编码。
+        prompt_tokens = ctx.metadata.pop(PROMPT_TOKENS_KEY, None)
+        if prompt_tokens is None:
+            prompt_tokens = sum(count_tokens(m.content) for m in messages)
         completion_tokens = count_tokens(completion)
         if settings.otel_capture_content:
             span.set_attribute("llm.output_messages.0.message.content", completion)
@@ -66,7 +74,7 @@ class TracedLLMProvider(LLMProvider):
             "llm.generate", attributes=self._base_attrs(ctx, messages)
         ) as span:
             result = await self._inner.generate(ctx, messages, **kwargs)
-            self._finish_attrs(span, messages, result)
+            self._finish_attrs(span, ctx, messages, result)
             return result
 
     async def stream_generate(
@@ -93,5 +101,5 @@ class TracedLLMProvider(LLMProvider):
             span.set_status(StatusCode.ERROR, str(e))
             raise
         finally:
-            self._finish_attrs(span, messages, "".join(chunks))
+            self._finish_attrs(span, ctx, messages, "".join(chunks))
             span.end()

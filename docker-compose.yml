@@ -227,6 +227,12 @@ services:
     volumes:
       - phoenix_data:/mnt/data    # SQLite 落盘，重启不丢 trace
     restart: unless-stopped
+    healthcheck:
+      # 镜像是 Python 应用,不赌 curl/wget 存在,用自带解释器探活
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 
 volumes:
