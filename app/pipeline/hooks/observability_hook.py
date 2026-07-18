@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
+from opentelemetry import context as otel_context
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import StatusCode
 
@@ -18,8 +19,10 @@ _tracer = get_tracer("arc.pipeline")
 # ctx.metadata 里的 key
 _PIPELINE_SPAN_KEY = "_obs_pipeline_span"
 _PIPELINE_START_KEY = "_obs_pipeline_start"
+_PIPELINE_TOKEN_KEY = "_obs_pipeline_ctxtoken"
 _STAGE_SPAN_KEY = "_obs_span_{}"
 _STAGE_START_KEY = "_obs_start_{}"
+_STAGE_TOKEN_KEY = "_obs_ctxtoken_{}"
 
 
 class ObservabilityHook(BaseHook):
@@ -56,6 +59,11 @@ class ObservabilityHook(BaseHook):
             )
             ctx.metadata[_PIPELINE_SPAN_KEY] = span
             ctx.metadata[_PIPELINE_START_KEY] = time.monotonic()
+            # 激活为当前上下文:pipeline 内所有 span(stage、stage 内的 LLM 调用)自动认树。
+            # 管线是同一任务内的顺序 await,无 yield 泄漏风险;POST_PIPELINE/ON_ERROR 处 detach。
+            ctx.metadata[_PIPELINE_TOKEN_KEY] = otel_context.attach(
+                otel_trace.set_span_in_context(span)
+            )
             logger.info(
                 "[Pipeline] START  tenant=%s task=%s trace=%s",
                 ctx.tenant_id,
@@ -81,8 +89,15 @@ class ObservabilityHook(BaseHook):
             )
             ctx.metadata[_STAGE_SPAN_KEY.format(event.stage.name)] = span
             ctx.metadata[_STAGE_START_KEY.format(event.stage.name)] = time.monotonic()
+            # 激活 stage span:stage 内部的 llm.generate 等子 span 才能挂到它下面
+            ctx.metadata[_STAGE_TOKEN_KEY.format(event.stage.name)] = otel_context.attach(
+                otel_trace.set_span_in_context(span)
+            )
 
         elif event.phase == Phase.POST_STAGE and event.stage:
+            token = ctx.metadata.pop(_STAGE_TOKEN_KEY.format(event.stage.name), None)
+            if token is not None:
+                otel_context.detach(token)
             start = ctx.metadata.get(_STAGE_START_KEY.format(event.stage.name), time.monotonic())
             elapsed_s = time.monotonic() - start
             elapsed_ms = elapsed_s * 1000
@@ -130,7 +145,10 @@ class ObservabilityHook(BaseHook):
             # Prometheus
             PIPELINE_TOTAL.labels(status="success", tenant_id=ctx.tenant_id).inc()
 
-            # OTel Span
+            # OTel Span:先还原上下文,再结束 span
+            token = ctx.metadata.pop(_PIPELINE_TOKEN_KEY, None)
+            if token is not None:
+                otel_context.detach(token)
             span = ctx.metadata.pop(_PIPELINE_SPAN_KEY, None)
             if span is not None:
                 span.end()
@@ -147,6 +165,14 @@ class ObservabilityHook(BaseHook):
 
             # Prometheus
             PIPELINE_TOTAL.labels(status="error", tenant_id=ctx.tenant_id).inc()
+
+            # 还原上下文(LIFO:先 stage 后 pipeline),再结束 span
+            stage_token = ctx.metadata.pop(_STAGE_TOKEN_KEY.format(stage_name), None)
+            if stage_token is not None:
+                otel_context.detach(stage_token)
+            pipeline_token = ctx.metadata.pop(_PIPELINE_TOKEN_KEY, None)
+            if pipeline_token is not None:
+                otel_context.detach(pipeline_token)
 
             # 结束 Stage Span（标记为 ERROR）
             span = ctx.metadata.pop(_STAGE_SPAN_KEY.format(stage_name), None)

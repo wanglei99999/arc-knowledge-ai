@@ -4,6 +4,9 @@ import asyncio
 import dataclasses
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import aclosing
+
+from opentelemetry.trace import StatusCode
 
 from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter
@@ -11,7 +14,7 @@ from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
 from app.infrastructure.telemetry.otel import get_tracer
-from app.infrastructure.telemetry.spans import traced_block
+from app.infrastructure.telemetry.spans import activate_span, traced_block
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
@@ -150,8 +153,10 @@ class RAGOrchestrator:
         """流式生成，yield token，供 SSE 推送。"""
         ctx, provider = await self.build_llm(tenant_id, model)
         messages = self._build_messages(result, history)
-        async for token in provider.stream_generate(ctx, messages):
-            yield token
+        # aclosing:消费方中途放弃时逐层确定性关闭,span/连接不等 GC
+        async with aclosing(provider.stream_generate(ctx, messages)) as stream:
+            async for token in stream:
+                yield token
 
     async def chat(
         self,
@@ -170,47 +175,63 @@ class RAGOrchestrator:
         history 为空（首轮）时走缓存路径；有历史记录时直接走 RAG，
         避免多轮上下文污染缓存答案。
         """
-        # rag.chat 根 span：手动管理生命周期（流式生成器横跨多次 yield，
-        # 不设为 current 上下文以免上下文泄漏；子节点靠 FastAPI 根 span 归入同一 trace）。
+        # rag.chat 根 span。上下文纪律:只在"激活段"(无 yield 的顺序 await)内
+        # attach 为 current,任何 yield 之前必已 detach——避免泄漏给流式消费方。
         span = get_tracer("arc.rag").start_span("rag.chat")
         span.set_attribute("openinference.span.kind", "CHAIN")
         span.set_attribute("arc.tenant_id", tenant_id)
         if settings.otel_capture_content:
             span.set_attribute("input.value", query)
         try:
-            # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
-            # 否则同一 query 不同过滤条件会命中错误的缓存答案。
-            use_cache = not history and not metadata_filters
-            if use_cache:
-                with traced_block("cache.lookup") as cache_span:
-                    cached = await _cache.get(query, tenant_id, space_id)
-                    cache_span.set_attribute("arc.cache.hit", cached is not None)
-                if cached:
-                    yield cached.answer
-                    if cached.citations:
-                        yield cached.citations
-                    return
+            cached = None
+            first: str | None = None
+            agen: AsyncIterator[str] | None = None
+            # ── 激活段:缓存/检索/首 token,产生的子 span 全部挂到 rag.chat 下 ──
+            with activate_span(span):
+                # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
+                # 否则同一 query 不同过滤条件会命中错误的缓存答案。
+                use_cache = not history and not metadata_filters
+                if use_cache:
+                    with traced_block("cache.lookup") as cache_span:
+                        cached = await _cache.get(query, tenant_id, space_id)
+                        cache_span.set_attribute("arc.cache.hit", cached is not None)
+                if not cached:
+                    result = await self.retrieve(
+                        query_text=query,
+                        tenant_id=tenant_id,
+                        space_id=space_id,
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                        model=model,
+                        metadata_filters=metadata_filters,
+                    )
+                    history_messages = [
+                        ChatMessage(role=m["role"], content=m["content"]) for m in history
+                    ]
+                    agen = self.stream_generate(
+                        result=result,
+                        history=history_messages,
+                        tenant_id=tenant_id,
+                        model=model,
+                    )
+                    # 预取首 token:llm.generate span 在此创建,认 rag.chat 当爹
+                    first = await anext(agen, None)
 
-            result = await self.retrieve(
-                query_text=query,
-                tenant_id=tenant_id,
-                space_id=space_id,
-                top_k=top_k,
-                score_threshold=score_threshold,
-                model=model,
-                metadata_filters=metadata_filters,
-            )
-            history_messages = [ChatMessage(role=m["role"], content=m["content"]) for m in history]
+            # ── 流式段:上下文已还原,可以放心 yield ──
+            if cached:
+                yield cached.answer
+                if cached.citations:
+                    yield cached.citations
+                return
 
-            tokens: list[str] = []
-            async for token in self.stream_generate(
-                result=result,
-                history=history_messages,
-                tenant_id=tenant_id,
-                model=model,
-            ):
-                tokens.append(token)
-                yield token
+            tokens: list[str] = [] if first is None else [first]
+            if first is not None:
+                yield first
+            assert agen is not None
+            async with aclosing(agen):
+                async for token in agen:
+                    tokens.append(token)
+                    yield token
 
             citations = self._build_citations(result)
             if citations:
@@ -220,6 +241,10 @@ class RAGOrchestrator:
                 asyncio.create_task(
                     _cache.set(query, "".join(tokens), citations, tenant_id, space_id)
                 )
+        except BaseException as e:
+            # 含 GeneratorExit/CancelledError:中断与失败都要如实标记,不吞异常
+            span.set_status(StatusCode.ERROR, str(e))
+            raise
         finally:
             span.end()
 
