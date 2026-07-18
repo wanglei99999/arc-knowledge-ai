@@ -57,16 +57,22 @@ def fake_ctx(tenant_config: TenantConfig, quota: QuotaSnapshot) -> ProcessingCon
 
 
 # ── OTel 测试底座 ─────────────────────────────────────────────────────────────
-# 全局 TracerProvider 一个进程只能 set 一次，故放在 conftest 模块级（import 时执行）。
 # SimpleSpanProcessor 同步导出到内存，测试里 span 立等可取——不需要 Phoenix、不发网络。
+# 副作用收敛在 session 级 fixture 内(而非模块 import 期),生命周期归 pytest 管;
+# 全局 TracerProvider 一个进程只能 set 一次,autouse 保证恰好一次。
 _SPAN_EXPORTER = _InMemorySpanExporter()
-_test_provider = _TracerProvider()
-_test_provider.add_span_processor(_SimpleSpanProcessor(_SPAN_EXPORTER))
-_otel_trace.set_tracer_provider(_test_provider)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _otel_test_provider() -> "_InMemorySpanExporter":
+    provider = _TracerProvider()
+    provider.add_span_processor(_SimpleSpanProcessor(_SPAN_EXPORTER))
+    _otel_trace.set_tracer_provider(provider)
+    return _SPAN_EXPORTER
 
 
 @pytest.fixture
-def span_exporter() -> _InMemorySpanExporter:
+def span_exporter(_otel_test_provider: _InMemorySpanExporter) -> _InMemorySpanExporter:
     """每个测试拿到清空后的内存导出器，断言 span 树形与属性用。"""
     _SPAN_EXPORTER.clear()
     return _SPAN_EXPORTER

@@ -60,6 +60,17 @@ async def test_stream_error_propagates_and_span_ends(fake_ctx, span_exporter):
     assert span.status.status_code == StatusCode.ERROR  # 记错误但不吞异常
 
 
+async def test_precomputed_prompt_tokens_reused(fake_ctx, span_exporter):
+    """编排层已算过的 prompt token 数直接消费,不对同一 prompt 二次编码。"""
+    from app.providers.llm.traced_llm import PROMPT_TOKENS_KEY
+
+    fake_ctx.metadata[PROMPT_TOKENS_KEY] = 12345
+    await TracedLLMProvider(_FakeLLM()).generate(fake_ctx, _MSGS)
+    span = [s for s in span_exporter.get_finished_spans() if s.name == "llm.generate"][0]
+    assert span.attributes["llm.token_count.prompt"] == 12345
+    assert PROMPT_TOKENS_KEY not in fake_ctx.metadata  # pop 消费,不残留污染下次调用
+
+
 async def test_stream_abort_marks_error(fake_ctx, span_exporter):
     """客户端断开(aclose→GeneratorExit)不能被记成成功——BaseException 才接得住。"""
     from opentelemetry.trace import StatusCode

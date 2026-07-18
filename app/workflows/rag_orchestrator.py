@@ -14,13 +14,14 @@ from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
-from app.infrastructure.telemetry.extractors import chunk_doc_attrs
+from app.infrastructure.telemetry.extractors import KIND_KEY, chunk_doc_attrs
 from app.infrastructure.telemetry.otel import get_tracer
 from app.infrastructure.telemetry.spans import activate_span, traced_block
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage, LLMProvider
 from app.providers.llm.model_hub import model_hub
+from app.providers.llm.traced_llm import PROMPT_TOKENS_KEY
 from app.services.tenant_config_service import TenantConfigService
 from app.utils.tokenizer import count_tokens
 
@@ -140,7 +141,8 @@ class RAGOrchestrator:
     ) -> str:
         """非流式生成（用于测试 / 批处理）。"""
         ctx, provider = await self.build_llm(tenant_id, model)
-        messages = self._build_messages(result, history)
+        messages, prompt_tokens = self._build_messages(result, history)
+        ctx.metadata[PROMPT_TOKENS_KEY] = prompt_tokens  # 观测层复用,避免二次编码
         return await provider.generate(ctx, messages)
 
     async def stream_generate(
@@ -152,7 +154,8 @@ class RAGOrchestrator:
     ) -> AsyncIterator[str]:
         """流式生成，yield token，供 SSE 推送。"""
         ctx, provider = await self.build_llm(tenant_id, model)
-        messages = self._build_messages(result, history)
+        messages, prompt_tokens = self._build_messages(result, history)
+        ctx.metadata[PROMPT_TOKENS_KEY] = prompt_tokens  # 观测层复用,避免二次编码
         # aclosing:消费方中途放弃时逐层确定性关闭,span/连接不等 GC
         async with aclosing(provider.stream_generate(ctx, messages)) as stream:
             async for token in stream:
@@ -178,7 +181,7 @@ class RAGOrchestrator:
         # rag.chat 根 span。上下文纪律:只在"激活段"(无 yield 的顺序 await)内
         # attach 为 current,任何 yield 之前必已 detach——避免泄漏给流式消费方。
         span = get_tracer("arc.rag").start_span("rag.chat")
-        span.set_attribute("openinference.span.kind", "CHAIN")
+        span.set_attribute(KIND_KEY, "CHAIN")
         span.set_attribute("arc.tenant_id", tenant_id)
         if settings.otel_capture_content:
             span.set_attribute("input.value", query)
@@ -269,7 +272,13 @@ class RAGOrchestrator:
         self,
         result: RetrievalResult,
         history: list[ChatMessage],
-    ) -> list[ChatMessage]:
+    ) -> tuple[list[ChatMessage], int]:
+        """返回 (messages, prompt_tokens)。
+
+        prompt_tokens 是预算计算的副产品——这里已经把全部文本编码过一遍,
+        带出去给观测层复用,避免 TracedLLMProvider 对同一 prompt 再编码一次
+        (28k token 级文本的二次编码是热路径上纯冗余的几十毫秒同步阻塞)。
+        """
         # 计算可用于 chunk context 的 token 预算
         history_tokens = sum(count_tokens(m.content) for m in history)
         query_tokens = count_tokens(result.query_text)
@@ -282,17 +291,18 @@ class RAGOrchestrator:
             - template_tokens
         )
 
-        context = self._truncate_context(result, max_tokens=max(budget, 0))
+        context, context_tokens = self._truncate_context(result, max_tokens=max(budget, 0))
         system = ChatMessage(
             role="system",
             content=_SYSTEM_PROMPT.format(context=context),
         )
         user = ChatMessage(role="user", content=result.query_text)
-        return [system, *history, user]
+        prompt_tokens = template_tokens + context_tokens + history_tokens + query_tokens
+        return [system, *history, user], prompt_tokens
 
     @staticmethod
-    def _truncate_context(result: RetrievalResult, max_tokens: int) -> str:
-        """按检索相关性顺序加入 chunk，超出 token 预算时截止。"""
+    def _truncate_context(result: RetrievalResult, max_tokens: int) -> tuple[str, int]:
+        """按检索相关性顺序加入 chunk，超出 token 预算时截止。返回 (文本, 实际用掉的 token 数)。"""
         chunk_map = {c["chunk_id"]: c for c in result.chunks}
         parts: list[str] = []
         used = 0
@@ -309,4 +319,4 @@ class RAGOrchestrator:
             parts.append(part)
             used += part_tokens
 
-        return "\n\n".join(parts)
+        return "\n\n".join(parts), used
