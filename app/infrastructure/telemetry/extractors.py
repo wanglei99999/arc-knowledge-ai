@@ -70,5 +70,20 @@ class RetrievalExtractor:
         return attrs
 
 
+def chunk_doc_attrs(chunks: list[dict]) -> dict[str, Any]:
+    """
+    chunk.fetch 专用:把 PG 查回的 chunk dict 摊平成带文本的 OpenInference 文档属性。
+    与 _doc_attrs 共享 _DOC_LIMIT 上限;.get 兜底,仓储返回形状变更不抛 KeyError。
+    """
+    attrs: dict[str, Any] = {"arc.chunk.count": len(chunks)}
+    if not settings.otel_capture_content:
+        return attrs
+    limit = settings.otel_content_max_chars
+    for i, c in enumerate(chunks[:_DOC_LIMIT]):
+        attrs[f"retrieval.documents.{i}.document.id"] = c.get("chunk_id", "")
+        attrs[f"retrieval.documents.{i}.document.content"] = (c.get("content") or "")[:limit]
+    return attrs
+
+
 # 模块级注册表:入库侧将来要收内容,在此 append 一个新 extractor 即可,Hook 不改
 EXTRACTORS: list[ContentExtractor] = [RetrievalExtractor()]

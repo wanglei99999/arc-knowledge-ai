@@ -46,6 +46,33 @@ class ObservabilityHook(BaseHook):
     priority = 100  # 最后执行，不干扰业务 Hook
 
     async def handle(self, event: HookEvent) -> HookResult:
+        # 观测铁律:本 Hook 任何内部失败(tracer/metrics/日志)都不许影响业务管线。
+        # 只有观测 Hook 自我免责——Guard 类 Hook 抛错/ABORT 是它们的本职,不在此列。
+        try:
+            return await self._handle(event)
+        except Exception:
+            logger.warning(
+                "observability hook failed (phase=%s), business continues",
+                event.phase,
+                exc_info=True,
+            )
+            return HookResult.CONTINUE
+
+    @staticmethod
+    def _run_extractors(span: otel_trace.Span, stage_name: str, payload: object | None) -> None:
+        """内容收割:extractor 认领 payload 并翻译成 span 属性。失败吞掉记日志。"""
+        if payload is None:
+            return
+        for extractor in EXTRACTORS:
+            try:
+                if extractor.matches(stage_name, payload):
+                    span.set_attributes(extractor.extract(stage_name, payload))
+            except Exception:
+                logger.warning(
+                    "content extractor failed on stage %s", stage_name, exc_info=True
+                )
+
+    async def _handle(self, event: HookEvent) -> HookResult:
         ctx = event.ctx
 
         if event.phase == Phase.PRE_PIPELINE:
@@ -113,21 +140,7 @@ class ObservabilityHook(BaseHook):
                 _STAGE_SPAN_KEY.format(event.stage.name), None
             )
             if span is not None:
-                # 内容收割:extractor 认领 payload 并翻译成属性。
-                # 观测失败不允许影响业务——任何异常吞掉记日志。
-                if event.payload is not None:
-                    for extractor in EXTRACTORS:
-                        try:
-                            if extractor.matches(event.stage.name, event.payload):
-                                span.set_attributes(
-                                    extractor.extract(event.stage.name, event.payload)
-                                )
-                        except Exception:
-                            logger.warning(
-                                "content extractor failed on stage %s",
-                                event.stage.name,
-                                exc_info=True,
-                            )
+                self._run_extractors(span, event.stage.name, event.payload)
                 span.end()
 
             logger.info(

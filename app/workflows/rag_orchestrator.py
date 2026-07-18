@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -13,6 +14,7 @@ from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
+from app.infrastructure.telemetry.extractors import chunk_doc_attrs
 from app.infrastructure.telemetry.otel import get_tracer
 from app.infrastructure.telemetry.spans import activate_span, traced_block
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
@@ -21,6 +23,8 @@ from app.providers.base import ChatMessage, LLMProvider
 from app.providers.llm.model_hub import model_hub
 from app.services.tenant_config_service import TenantConfigService
 from app.utils.tokenizer import count_tokens
+
+logger = logging.getLogger(__name__)
 
 # 系统 Prompt 模板
 _SYSTEM_PROMPT = """你是一个知识库问答助手。请根据以下检索到的文档片段回答用户问题。
@@ -115,15 +119,11 @@ class RAGOrchestrator:
         chunk_ids = [h.chunk_id for h in hits]
         with traced_block("chunk.fetch") as span:
             chunks = await self._chunk_repo.get_chunks_by_ids(chunk_ids, tenant_id)
-            span.set_attribute("arc.chunk.count", len(chunks))
-            if settings.otel_capture_content:
-                limit = settings.otel_content_max_chars
-                for i, c in enumerate(chunks[:10]):
-                    span.set_attribute(f"retrieval.documents.{i}.document.id", c["chunk_id"])
-                    span.set_attribute(
-                        f"retrieval.documents.{i}.document.content",
-                        (c.get("content") or "")[:limit],
-                    )
+            try:
+                # 带文本的最终文档列表挂在这——文本真实存在之处(helper 复用 _DOC_LIMIT/截断)
+                span.set_attributes(chunk_doc_attrs(chunks))
+            except Exception:
+                logger.warning("chunk.fetch span attributes failed", exc_info=True)
 
         return RetrievalResult(
             query_text=query_text,

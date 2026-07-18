@@ -57,3 +57,22 @@ def test_capture_content_off_hides_text(monkeypatch):
     attrs = RetrievalExtractor().extract("query_rewrite", _ctx_with_hits())
     assert "input.value" not in attrs and "output.value" not in attrs
     assert attrs["arc.retrieval.intent_is_valid"] is True  # 结构照记
+
+
+def test_chunk_doc_attrs_truncates_and_survives_missing_keys():
+    from app.infrastructure.telemetry.extractors import chunk_doc_attrs
+
+    chunks = [{"chunk_id": "c1", "content": "x" * 500}, {"unexpected_shape": True}]
+    attrs = chunk_doc_attrs(chunks)
+    assert attrs["arc.chunk.count"] == 2
+    assert len(attrs["retrieval.documents.0.document.content"]) == 300  # 截断
+    assert attrs["retrieval.documents.1.document.id"] == ""  # 缺 key 不炸
+
+
+def test_chunk_doc_attrs_capture_off_keeps_structure(monkeypatch):
+    from app.config.settings import settings
+    from app.infrastructure.telemetry.extractors import chunk_doc_attrs
+
+    monkeypatch.setattr(settings, "otel_capture_content", False)
+    attrs = chunk_doc_attrs([{"chunk_id": "c1", "content": "abc"}])
+    assert attrs == {"arc.chunk.count": 1}  # 内容关掉,结构照记
