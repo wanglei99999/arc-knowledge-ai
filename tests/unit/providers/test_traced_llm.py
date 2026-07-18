@@ -58,3 +58,16 @@ async def test_stream_error_propagates_and_span_ends(fake_ctx, span_exporter):
     from opentelemetry.trace import StatusCode
 
     assert span.status.status_code == StatusCode.ERROR  # 记错误但不吞异常
+
+
+async def test_stream_abort_marks_error(fake_ctx, span_exporter):
+    """客户端断开(aclose→GeneratorExit)不能被记成成功——BaseException 才接得住。"""
+    from opentelemetry.trace import StatusCode
+
+    agen = TracedLLMProvider(_FakeLLM()).stream_generate(fake_ctx, _MSGS)
+    assert await anext(agen) == "四"
+    await agen.aclose()  # 模拟 SSE 客户端中途断开
+
+    spans = [s for s in span_exporter.get_finished_spans() if s.name == "llm.generate"]
+    assert len(spans) == 1  # span 立即闭合,不等 GC
+    assert spans[0].status.status_code == StatusCode.ERROR

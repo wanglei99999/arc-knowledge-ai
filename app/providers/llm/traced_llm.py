@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import aclosing
 from typing import Any, AsyncIterator
 
 from opentelemetry.trace import StatusCode
@@ -76,15 +77,19 @@ class TracedLLMProvider(LLMProvider):
         first = True
         chunks: list[str] = []
         try:
-            async for token in self._inner.stream_generate(ctx, messages, **kwargs):
-                if first:
-                    span.set_attribute(
-                        "arc.llm.time_to_first_token_ms", (time.monotonic() - start) * 1000
-                    )
-                    first = False
-                chunks.append(token)
-                yield token
-        except Exception as e:
+            # aclosing:上游中途放弃时内层流被确定性关闭,不等 GC
+            async with aclosing(self._inner.stream_generate(ctx, messages, **kwargs)) as inner:
+                async for token in inner:
+                    if first:
+                        span.set_attribute(
+                            "arc.llm.time_to_first_token_ms", (time.monotonic() - start) * 1000
+                        )
+                        first = False
+                    chunks.append(token)
+                    yield token
+        except BaseException as e:
+            # BaseException 才接得住 GeneratorExit(客户端断开)/CancelledError,
+            # 否则中断的流会被记成"成功"——遥测静默失真。异常原样上抛。
             span.set_status(StatusCode.ERROR, str(e))
             raise
         finally:
