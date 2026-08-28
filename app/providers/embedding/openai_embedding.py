@@ -7,19 +7,6 @@ from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.providers.base import EmbeddingProvider, HealthStatus
 
-_DIMENSIONS: dict[str, int] = {
-    "text-embedding-3-small": 1536,
-    "text-embedding-3-large": 3072,
-    "text-embedding-ada-002": 1536,
-    "text-embedding-v3": 1024,
-    "text-embedding-v4": 1024,
-    # BGE 系列（本地部署）
-    "bge-large-zh-v1.5": 1024,
-    "bge-large-en-v1.5": 1024,
-    "bge-m3": 1024,
-    "/model": 1024,   # vLLM 以挂载路径作为 model name 时的兜底
-}
-
 
 @registry.provider("openai_embedding")
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -65,13 +52,14 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             response = await self._client.embeddings.create(
                 model=self._model,
                 input=batch,
+                dimensions=settings.openai_embedding_dimensions,
             )
             sorted_data = sorted(response.data, key=lambda x: x.index)
             results.extend(item.embedding for item in sorted_data)
         return results
 
     def get_dimension(self) -> int:
-        return _DIMENSIONS.get(self._model, 1536)
+        return settings.openai_embedding_dimensions
 
     def get_model_name(self) -> str:
         return self._model

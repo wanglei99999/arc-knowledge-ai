@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
 
@@ -40,6 +40,7 @@ class OpenAILLMProvider(LLMProvider):
 
     # model → context_window 映射（常见 OpenAI 模型）
     _CONTEXT_WINDOWS: dict[str, int] = {
+        "deepseek-v4-flash":   1_000_000,
         "gpt-4o":              128_000,
         "gpt-4o-mini":         128_000,
         "gpt-4-turbo":         128_000,
