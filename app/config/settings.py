@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     openai_embedding_base_url: str = ""  # 留空则复用 openai_base_url
     openai_embedding_api_key: str = Field(default="", repr=False)  # 留空则复用 openai_api_key
     openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dimensions: int = 1536
     openai_embedding_batch_size: int = 10
 
     # ── Ollama（本地 LLM）────────────────────────────────────────────────────

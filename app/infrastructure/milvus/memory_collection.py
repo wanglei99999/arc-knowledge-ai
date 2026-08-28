@@ -13,17 +13,8 @@ _F_USER_ID = "user_id"
 _F_TENANT_ID = "tenant_id"
 _F_EMBEDDING = "embedding"
 
-_MODEL_DIMS = {
-    "text-embedding-3-small": 1536,
-    "text-embedding-3-large": 3072,
-    "text-embedding-ada-002": 1536,
-    "text-embedding-v3": 1024,
-    "text-embedding-v4": 1024,
-}
-
-
 def _memory_dim() -> int:
-    return _MODEL_DIMS.get(settings.openai_embedding_model, 1536)
+    return settings.openai_embedding_dimensions
 
 
 def _client() -> MilvusClient:
