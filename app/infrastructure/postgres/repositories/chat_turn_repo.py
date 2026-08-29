@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.domain.chat_turn import (
+    AnswerClaim,
     AssistantAnswerView,
     AttachmentDeclaration,
     AttachmentStatus,
@@ -393,6 +394,99 @@ class ChatTurnRepository:
             "tenant_id": tenant_id,
             "user_id": user_id,
         })
+
+    async def claim_ready_answer(
+        self,
+        *,
+        turn_id: str,
+        tenant_id: str,
+        user_id: str,
+    ) -> AnswerClaim | None:
+        """仅在所有有效附件均已入库时抢占回答，并返回可信文档范围。"""
+        params = {
+            "turn_id": turn_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+        async with get_session() as db:
+            result = await db.execute(text("""
+                UPDATE messages AS m
+                SET processing_status = 'answering', processing_error = NULL
+                FROM sessions AS s
+                WHERE m.message_id = :turn_id
+                  AND m.session_id = s.session_id
+                  AND m.role = 'user'
+                  AND m.tenant_id = :tenant_id
+                  AND m.user_id = :user_id
+                  AND s.tenant_id = :tenant_id
+                  AND s.user_id = :user_id
+                  AND m.processing_status IN ('waiting_files', 'answer_failed')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM message_attachments AS ma
+                      JOIN documents AS d
+                        ON d.id = ma.document_id
+                       AND d.tenant_id = ma.tenant_id
+                       AND d.space_id = ma.space_id
+                      WHERE ma.message_id = m.message_id
+                        AND ma.tenant_id = m.tenant_id
+                        AND ma.ignored = FALSE
+                        AND ma.upload_status = 'uploaded'
+                        AND d.status = 'indexed'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM message_attachments AS ma
+                      LEFT JOIN documents AS d
+                        ON d.id = ma.document_id
+                       AND d.tenant_id = ma.tenant_id
+                       AND d.space_id = ma.space_id
+                      WHERE ma.message_id = m.message_id
+                        AND ma.tenant_id = m.tenant_id
+                        AND ma.ignored = FALSE
+                        AND (
+                            ma.upload_status <> 'uploaded'
+                            OR ma.document_id IS NULL
+                            OR d.id IS NULL
+                            OR d.status <> 'indexed'
+                        )
+                  )
+                RETURNING m.message_id, m.session_id, s.space_id, m.content
+            """), params)
+            row = result.one_or_none()
+            if row is None:
+                return None
+
+            scope_result = await db.execute(text("""
+                SELECT DISTINCT ma.document_id
+                FROM message_attachments AS ma
+                JOIN documents AS d
+                  ON d.id = ma.document_id
+                 AND d.tenant_id = ma.tenant_id
+                 AND d.space_id = ma.space_id
+                WHERE ma.message_id = :turn_id
+                  AND ma.tenant_id = :tenant_id
+                  AND ma.ignored = FALSE
+                  AND ma.upload_status = 'uploaded'
+                  AND d.status = 'indexed'
+                ORDER BY ma.document_id
+            """), params)
+            document_ids = [
+                str(document_row._mapping["document_id"])
+                for document_row in scope_result.fetchall()
+            ]
+            if not document_ids:
+                raise RuntimeError("回答文档范围在抢占过程中发生变化")
+            mapping = row._mapping
+            return AnswerClaim(
+                turn_id=str(mapping["message_id"]),
+                session_id=str(mapping["session_id"]),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                space_id=str(mapping["space_id"]),
+                query=mapping["content"],
+                document_ids=document_ids,
+            )
 
     async def fail_answer(
         self,

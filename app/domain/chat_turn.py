@@ -83,6 +83,19 @@ class ChatTurnView:
     assistant: AssistantAnswerView | None
 
 
+@dataclass(frozen=True)
+class AnswerClaim:
+    """数据库原子抢占成功后返回的可信附件回答上下文。"""
+
+    turn_id: str
+    session_id: str
+    tenant_id: str
+    user_id: str
+    space_id: str
+    query: str
+    document_ids: list[str]
+
+
 def compute_readiness(
     attachments: Sequence[AttachmentView],
 ) -> TurnReadiness:
