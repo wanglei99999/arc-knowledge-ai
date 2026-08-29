@@ -11,7 +11,12 @@ from opentelemetry.trace import StatusCode
 
 from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter
-from app.domain.retrieval import RetrievalQuery, RetrievalResult, SearchContext
+from app.domain.retrieval import (
+    RetrievalQuery,
+    RetrievalResult,
+    SearchContext,
+    normalize_document_ids,
+)
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
 from app.infrastructure.telemetry.extractors import KIND_KEY, chunk_doc_attrs
@@ -94,6 +99,7 @@ class RAGOrchestrator:
         score_threshold: float = 0.5,
         model: str | None = None,
         metadata_filters: list[MetadataFilter] | None = None,
+        document_ids: list[str] | None = None,
     ) -> RetrievalResult:
         """执行混合检索，返回带文本的检索结果。"""
         config = await self._tenant_config_svc.get_or_default(tenant_id)
@@ -105,6 +111,7 @@ class RAGOrchestrator:
         # with_hooks 版本:否则 strategy.hooks 声明形同虚设,检索链路无 trace
         pipeline = strategy.build_pipeline_with_hooks("query", config)
 
+        canonical_document_ids = normalize_document_ids(document_ids)
         query = RetrievalQuery(
             query_text=query_text,
             tenant_id=tenant_id,
@@ -112,9 +119,13 @@ class RAGOrchestrator:
             top_k=top_k,
             score_threshold=score_threshold,
             metadata_filters=metadata_filters or [],
+            document_ids=canonical_document_ids,
         )
         search_ctx = SearchContext(query=query)
         hits = await pipeline.run(ctx, search_ctx)  # → list[SearchHit]
+        if canonical_document_ids:
+            allowed = set(canonical_document_ids)
+            hits = [hit for hit in hits if hit.document_id in allowed]
 
         # 从 PostgreSQL 拉取 chunk 文本
         chunk_ids = [h.chunk_id for h in hits]
@@ -171,6 +182,7 @@ class RAGOrchestrator:
         score_threshold: float = 0.5,
         model: str | None = None,
         metadata_filters: list[MetadataFilter] | None = None,
+        document_ids: list[str] | None = None,
     ) -> AsyncIterator[str | list]:
         """
         带语义缓存的流式问答门面。
@@ -186,6 +198,7 @@ class RAGOrchestrator:
         if settings.otel_capture_content:
             span.set_attribute("input.value", query)
         try:
+            canonical_document_ids = normalize_document_ids(document_ids)
             cached = None
             first: str | None = None
             agen: AsyncIterator[str] | None = None
@@ -193,7 +206,11 @@ class RAGOrchestrator:
             with activate_span(span):
                 # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
                 # 否则同一 query 不同过滤条件会命中错误的缓存答案。
-                use_cache = not history and not metadata_filters
+                use_cache = (
+                    not history
+                    and not metadata_filters
+                    and not canonical_document_ids
+                )
                 if use_cache:
                     with traced_block("cache.lookup") as cache_span:
                         cached = await _cache.get(query, tenant_id, space_id)
@@ -207,6 +224,7 @@ class RAGOrchestrator:
                         score_threshold=score_threshold,
                         model=model,
                         metadata_filters=metadata_filters,
+                        document_ids=canonical_document_ids,
                     )
                     history_messages = [
                         ChatMessage(role=m["role"], content=m["content"]) for m in history
