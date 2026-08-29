@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     minio_bucket: str = "arc-documents"
     minio_secure: bool = False
 
+    # ── 文档上传 ──────────────────────────────────────────────────────────────
+    # 统一由后端执行，聊天附件与普通文档上传不能依赖前端限制。
+    document_max_file_size_bytes: int = 200 * 1024 * 1024
+
     # ── 临时文件 ──────────────────────────────────────────────────────────────
     # 大文件解析时的临时目录，生产环境建议挂载独立卷（200MB+ 文件需要足够空间）
     temp_dir: str = "/tmp"

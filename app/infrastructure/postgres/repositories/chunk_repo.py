@@ -195,7 +195,8 @@ class ChunkRepository:
     ) -> dict | None:
         """查询文档元数据，主要用于获取 file_path（MinIO object key）"""
         sql = text("""
-            SELECT id AS document_id, tenant_id, file_path, status
+            SELECT id AS document_id, tenant_id, space_id, file_path,
+                   original_name, mime_type, file_size, status
             FROM documents
             WHERE id         = :document_id
               AND tenant_id  = :tenant_id
@@ -207,6 +208,30 @@ class ChunkRepository:
             })
             row = result.one_or_none()
             return _row_to_dict(row) if row else None
+
+    async def reset_failed_document(
+        self,
+        document_id: str,
+        tenant_id: str,
+    ) -> bool:
+        """仅把 failed 文档重置为 pending，供清理残留索引后的重试使用。"""
+        sql = text("""
+            UPDATE documents
+            SET status = 'pending',
+                chunk_count = 0,
+                error_message = NULL,
+                updated_at = NOW()
+            WHERE id = :document_id
+              AND tenant_id = :tenant_id
+              AND status = 'failed'
+            RETURNING id
+        """)
+        async with get_session() as session:
+            result = await session.execute(sql, {
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+            })
+            return result.one_or_none() is not None
 
     async def list_documents(
         self,

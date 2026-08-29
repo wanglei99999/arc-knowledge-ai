@@ -36,6 +36,9 @@ class Message:
     role: str        # "user" | "assistant"
     content: str
     token_count: int = 0
+    processing_status: str | None = None
+    processing_error: str | None = None
+    client_request_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

@@ -1,8 +1,10 @@
 """
 数据库迁移脚本：创建 ArcKnowledge 所需的 PostgreSQL 表结构。
 
-Schema 版本：v2（P0）
+Schema 版本：v3（聊天附件）
 相对旧版的变更：
+  新增：messages 附件轮次处理状态与 client_request_id 幂等键
+  新增：message_attachments 表（消息、附件占位与永久文档关系）
   新增：spaces 表（双标识 UUID id + space_key，settings JSONB）
   新增：message_citations 表（持久化 RAG 引用，含检索快照）
   新增：documents.file_size 字段
@@ -34,7 +36,8 @@ from app.config.settings import settings
 # ── P0 Schema ────────────────────────────────────────────────────────────────
 # 表创建顺序遵循外键依赖：
 #   spaces → documents → document_chunks
-#                      → sessions → messages → message_citations
+#                      → sessions → messages → message_attachments
+#                                           → message_citations
 #                      → memories
 
 DDL = """
@@ -167,11 +170,53 @@ CREATE TABLE IF NOT EXISTS messages (
     -- user | assistant
     content     TEXT         NOT NULL,
     token_count INTEGER      NOT NULL DEFAULT 0,
+    processing_status VARCHAR(32),
+    processing_error  TEXT,
+    client_request_id UUID,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
+-- CREATE TABLE IF NOT EXISTS 不会给旧表补列，因此保留显式增量迁移。
+ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS processing_status VARCHAR(32);
+
+ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS processing_error TEXT;
+
+ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS client_request_id UUID;
+
 CREATE INDEX IF NOT EXISTS idx_messages_session_time
     ON messages (session_id, created_at ASC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_client_request
+    ON messages (tenant_id, user_id, client_request_id)
+    WHERE client_request_id IS NOT NULL;
+
+-- ── 消息附件关系表 ────────────────────────────────────────────────────────────
+-- 上传状态只记录文件上传阶段；文档入库状态以 documents.status 为事实来源。
+CREATE TABLE IF NOT EXISTS message_attachments (
+    attachment_id UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id    UUID         NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+    tenant_id     VARCHAR(64)  NOT NULL,
+    space_id      UUID         NOT NULL REFERENCES spaces(id),
+    client_id     VARCHAR(128) NOT NULL,
+    document_id   UUID         REFERENCES documents(id),
+    file_name     VARCHAR(512) NOT NULL,
+    mime_type     VARCHAR(128) NOT NULL,
+    file_size     BIGINT       NOT NULL,
+    upload_status VARCHAR(32)  NOT NULL DEFAULT 'pending',
+    -- pending | uploaded | failed
+    upload_error  TEXT,
+    ignored       BOOLEAN      NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_message_attachment_client UNIQUE (message_id, client_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_attachments_message
+    ON message_attachments (message_id);
 
 -- ── RAG 引用记录表 ─────────────────────────────────────────────────────────────
 -- 持久化每次 RAG 回答引用的 chunk 来源，含快照字段保证历史可溯源
@@ -285,7 +330,8 @@ async def migrate() -> None:
         await conn.execute(DDL)
         print("Migration completed successfully.")
         print("Tables created: spaces, documents, document_chunks,")
-        print("                sessions, messages, message_citations, memories,")
+        print("                sessions, messages, message_attachments,")
+        print("                message_citations, memories,")
         print("                tenant_configs")
     finally:
         await conn.close()
