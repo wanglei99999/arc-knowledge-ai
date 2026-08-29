@@ -7,6 +7,7 @@ from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, Milvus
 
 from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter
+from app.domain.retrieval import normalize_document_ids
 from app.infrastructure.milvus.filter_builder import build_milvus_expr
 
 # Collection 名称
@@ -136,14 +137,22 @@ def _build_search_filter(
     tenant_id: str,
     space_id: str,
     metadata_filters: list[MetadataFilter] | None = None,
+    document_ids: list[str] | None = None,
 ) -> str:
-    """拼接检索过滤表达式：tenant/space 硬隔离 + 可选 metadata 过滤。"""
-    base = f'{FIELD_TENANT_ID} == "{tenant_id}" and {FIELD_SPACE_ID} == "{space_id}"'
+    """拼接 tenant/space 硬隔离、文档范围与可选 metadata 条件。"""
+    clauses = [
+        f'{FIELD_TENANT_ID} == "{tenant_id}"',
+        f'{FIELD_SPACE_ID} == "{space_id}"',
+    ]
+    canonical_ids = normalize_document_ids(document_ids)
+    if canonical_ids:
+        values = ", ".join(f'"{document_id}"' for document_id in canonical_ids)
+        clauses.append(f"{FIELD_DOCUMENT_ID} in [{values}]")
     if metadata_filters:
         meta = build_milvus_expr(metadata_filters)
         if meta:
-            return f"{base} and {meta}"
-    return base
+            clauses.append(meta)
+    return " and ".join(clauses)
 
 
 async def search_vectors(
@@ -153,6 +162,7 @@ async def search_vectors(
     top_k: int = 10,
     score_threshold: float = 0.5,
     metadata_filters: list[MetadataFilter] | None = None,
+    document_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     ANN 向量检索，按 tenant_id Partition Key 隔离 + 可选 metadata 过滤。
@@ -166,7 +176,12 @@ async def search_vectors(
         results = client.search(
             collection_name=COLLECTION_NAME,
             data=[query_vector],
-            filter=_build_search_filter(tenant_id, space_id, metadata_filters),
+            filter=_build_search_filter(
+                tenant_id,
+                space_id,
+                metadata_filters=metadata_filters,
+                document_ids=document_ids,
+            ),
             limit=top_k,
             output_fields=[FIELD_CHUNK_ID, FIELD_DOCUMENT_ID, FIELD_CHUNK_INDEX],
             search_params={"metric_type": "COSINE", "params": {"ef": 100}},

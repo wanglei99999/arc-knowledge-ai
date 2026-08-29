@@ -52,6 +52,7 @@ class VectorSearchStage(BaseStage[SearchContext, SearchContext]):
                 top_k=query.top_k,
                 score_threshold=query.score_threshold,
                 metadata_filters=query.metadata_filters,
+                document_ids=query.document_ids,
             )
             for h in raw_hits:
                 hit = SearchHit(

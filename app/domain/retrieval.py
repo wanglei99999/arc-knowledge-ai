@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.domain.metadata_filter import MetadataFilter
+
+
+def normalize_document_ids(document_ids: Sequence[str] | None) -> list[str]:
+    """校验并统一为小写连字符 UUID，供各检索后端安全构造过滤条件。"""
+    if not document_ids:
+        return []
+    return [str(uuid.UUID(document_id)) for document_id in document_ids]
 
 
 @dataclass
@@ -20,6 +29,8 @@ class RetrievalQuery:
     intent_is_valid: bool = True
     # 通用元数据过滤条件；各 SearchStage 透传给 Milvus/ES（为空时不过滤）
     metadata_filters: list[MetadataFilter] = field(default_factory=list)
+    # 系统级文档范围；为空时检索整个 space，非空时只检索指定文档的 chunks
+    document_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

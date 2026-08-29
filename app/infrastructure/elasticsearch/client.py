@@ -6,6 +6,7 @@ from elasticsearch import Elasticsearch, NotFoundError
 
 from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter
+from app.domain.retrieval import normalize_document_ids
 from app.infrastructure.elasticsearch.filter_builder import build_es_clauses
 
 INDEX_NAME = "arc_chunks"
@@ -85,12 +86,16 @@ def _build_search_filters(
     tenant_id: str,
     space_id: str,
     metadata_filters: list[MetadataFilter] | None = None,
+    document_ids: list[str] | None = None,
 ) -> list[dict]:
-    """拼接 ES bool filter 子句：tenant/space 硬隔离 + 可选 metadata 过滤。"""
+    """拼接 tenant/space 硬隔离、文档范围与可选 metadata 子句。"""
     clauses: list[dict] = [
         {"term": {"tenant_id": tenant_id}},
         {"term": {"space_id": space_id}},
     ]
+    canonical_ids = normalize_document_ids(document_ids)
+    if canonical_ids:
+        clauses.append({"terms": {"document_id": canonical_ids}})
     if metadata_filters:
         clauses.extend(build_es_clauses(metadata_filters))
     return clauses
@@ -102,6 +107,7 @@ async def bm25_search(
     space_id: str,
     top_k: int = 10,
     metadata_filters: list[MetadataFilter] | None = None,
+    document_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     BM25 全文检索，按 tenant_id/space_id 过滤 + 可选 metadata 过滤。
@@ -117,7 +123,12 @@ async def bm25_search(
                     "query": {
                         "bool": {
                             "must": {"match": {"content": query_text}},
-                            "filter": _build_search_filters(tenant_id, space_id, metadata_filters),
+                            "filter": _build_search_filters(
+                                tenant_id,
+                                space_id,
+                                metadata_filters=metadata_filters,
+                                document_ids=document_ids,
+                            ),
                         }
                     },
                     "size": top_k,
