@@ -45,7 +45,7 @@ class SessionRepository:
         self, session_id: str, tenant_id: str, user_id: str
     ) -> Session | None:
         sql = text("""
-            SELECT session_id, tenant_id, user_id, title, summary,
+            SELECT session_id, tenant_id, user_id, space_id, title, summary,
                    message_count, created_at, updated_at
             FROM sessions
             WHERE session_id = :session_id
@@ -147,15 +147,19 @@ class SessionRepository:
         """按时间正序返回全部消息"""
         sql = text("""
             SELECT message_id, session_id, tenant_id, user_id,
-                   role, content, token_count, created_at
+                   role, content, token_count, processing_status,
+                   processing_error, client_request_id, created_at
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
+              AND user_id    = :user_id
             ORDER BY created_at ASC
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id,
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
             })
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
@@ -166,16 +170,21 @@ class SessionRepository:
         """返回最早的 n 条消息（时间正序）"""
         sql = text("""
             SELECT message_id, session_id, tenant_id, user_id,
-                   role, content, token_count, created_at
+                   role, content, token_count, processing_status,
+                   processing_error, client_request_id, created_at
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
+              AND user_id    = :user_id
             ORDER BY created_at ASC
             LIMIT :n
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id, "n": n,
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "n": n,
             })
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
@@ -186,16 +195,21 @@ class SessionRepository:
         """返回最近的 n 条消息（时间正序）"""
         sql = text("""
             SELECT message_id, session_id, tenant_id, user_id,
-                   role, content, token_count, created_at
+                   role, content, token_count, processing_status,
+                   processing_error, client_request_id, created_at
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
+              AND user_id    = :user_id
             ORDER BY created_at DESC
             LIMIT :n
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id, "n": n,
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "n": n,
             })
             rows = result.fetchall()
         # DESC 取出后反转为正序
@@ -212,10 +226,12 @@ class SessionRepository:
         """返回跳过最早 skip_first 和最新 skip_last 后的中间段消息（用于压缩）"""
         sql = text("""
             SELECT message_id, session_id, tenant_id, user_id,
-                   role, content, token_count, created_at
+                   role, content, token_count, processing_status,
+                   processing_error, client_request_id, created_at
             FROM messages
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
+              AND user_id    = :user_id
             ORDER BY created_at ASC
             OFFSET :skip_first
         """)
@@ -223,6 +239,7 @@ class SessionRepository:
             result = await db.execute(sql, {
                 "session_id":  session_id,
                 "tenant_id":   tenant_id,
+                "user_id":     user_id,
                 "skip_first":  skip_first,
             })
             rows = result.fetchall()
@@ -259,5 +276,12 @@ def _row_to_message(row) -> Message:
         role=r["role"],
         content=r["content"],
         token_count=r.get("token_count", 0),
+        processing_status=r.get("processing_status"),
+        processing_error=r.get("processing_error"),
+        client_request_id=(
+            str(r["client_request_id"])
+            if r.get("client_request_id")
+            else None
+        ),
         created_at=r["created_at"],
     )

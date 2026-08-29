@@ -80,13 +80,79 @@ class DocumentService:
             metadata=req.metadata,
         )
 
-        client = await self._get_temporal_client()
-        handle = await client.start_workflow(
-            IngestionWorkflow.run,
-            inp,
-            id=f"ingest-{document_id}",
-            task_queue=settings.temporal_task_queue,
+        try:
+            client = await self._get_temporal_client()
+            handle = await client.start_workflow(
+                IngestionWorkflow.run,
+                inp,
+                id=f"ingest-{document_id}",
+                task_queue=settings.temporal_task_queue,
+            )
+        except Exception:
+            repo = ChunkRepository()
+            await repo.update_document_status(
+                document_id,
+                req.tenant_id,
+                DocumentStatus.FAILED,
+                error_message="入库任务启动失败，请稍后再试",
+            )
+            raise
+
+        return IngestResult(
+            document_id=document_id,
+            task_id=task_id,
+            workflow_run_id=handle.run_id,
         )
+
+    async def retry_ingestion(
+        self,
+        document_id: str,
+        tenant_id: str,
+    ) -> IngestResult:
+        """清理失败 run 的残留索引，并复用 MinIO 原文件启动新的 Workflow。"""
+        repo = ChunkRepository()
+        meta = await repo.get_document_meta(document_id, tenant_id)
+        if meta is None:
+            raise ValueError(f"Document {document_id} not found")
+        if meta["status"] != DocumentStatus.FAILED.value:
+            raise ValueError(f"Document {document_id} is not failed")
+
+        # failed -> pending 是原子“抢占重试权”；并发请求只有一个能继续清理和启动。
+        reset = await repo.reset_failed_document(document_id, tenant_id)
+        if not reset:
+            raise ValueError(f"Document {document_id} is already being retried")
+
+        task_id = str(uuid.uuid4())
+        try:
+            # 文档在某个索引阶段失败时，三套存储可能只有部分写入。
+            await milvus_delete_by_document(document_id, tenant_id)
+            await es_delete_by_document(document_id, tenant_id)
+            await repo.delete_chunks_by_document(document_id, tenant_id)
+
+            inp = IngestionInput(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                file_path=meta["file_path"],
+                mime_type=meta["mime_type"],
+                original_filename=meta["original_name"],
+                task_id=task_id,
+                space_id=str(meta["space_id"]),
+            )
+            client = await self._get_temporal_client()
+            handle = await client.start_workflow(
+                IngestionWorkflow.run,
+                inp,
+                id=f"ingest-{document_id}-retry-{task_id}",
+                task_queue=settings.temporal_task_queue,
+            )
+        except Exception:
+            await repo.update_document_status(
+                document_id,
+                tenant_id,
+                DocumentStatus.FAILED,
+                error_message="重试任务启动失败，请稍后再试",
+            )
+            raise
 
         return IngestResult(
             document_id=document_id,
