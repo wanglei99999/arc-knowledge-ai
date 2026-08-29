@@ -67,6 +67,11 @@ class ContextAssembler:
         "你是一个知识库问答助手。请根据参考资料和用户记忆回答问题，"
         "回答准确、简洁，如果资料中没有相关信息请如实说明，不要编造内容。"
     )
+    STRICT_SOURCE_PROMPT = (
+        "你是一个附件问答助手。只能依据本轮附件的参考资料得出文档事实，"
+        "不得使用模型知识或用户记忆补充附件中没有的信息；证据不足时必须明确说明。"
+        "对话历史只用于理解代词、追问和上下文，不得作为附件事实来源。"
+    )
 
     def build(
         self,
@@ -74,11 +79,11 @@ class ContextAssembler:
         working_memory: WorkingMemory,
         semantic_memories: list[Memory],
         rag_text: str,
+        strict_sources: bool = False,
     ) -> list[ChatMessage]:
         buffer = 500
         available = context_window - buffer
 
-        budget_sys     = int(available * 0.08)
         budget_rag     = int(available * 0.40)
         budget_recent  = int(available * 0.25)
         budget_summary = int(available * 0.06)
@@ -87,9 +92,15 @@ class ContextAssembler:
         messages: list[ChatMessage] = []
 
         # ── 1. System message ─────────────────────────────────────────────────
-        system_parts = [self.SYSTEM_PROMPT]
+        system_parts = [
+            self.STRICT_SOURCE_PROMPT if strict_sources else self.SYSTEM_PROMPT
+        ]
 
-        mem_text = _memories_text(semantic_memories, budget_memories)
+        mem_text = (
+            ""
+            if strict_sources
+            else _memories_text(semantic_memories, budget_memories)
+        )
         if mem_text:
             system_parts.append(f"\n\n## 用户记忆\n{mem_text}")
 
@@ -101,7 +112,6 @@ class ContextAssembler:
 
         # ── 2. First-2 锚点（仅当 anchor 不在 recent 范围内时追加）──────────
         if working_memory.anchor:
-            anchor_ids = {m.message_id for m in working_memory.anchor}
             recent_ids = {m.message_id for m in working_memory.recent}
             truly_anchor = [m for m in working_memory.anchor if m.message_id not in recent_ids]
             for msg in truly_anchor:

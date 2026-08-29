@@ -376,6 +376,84 @@ async def test_claim_answer_updates_only_waiting_or_failed_turn(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_claim_ready_answer_atomically_checks_readiness_and_returns_scope(
+    monkeypatch,
+) -> None:
+    doc1 = "11111111-1111-4111-8111-111111111111"
+    doc2 = "22222222-2222-4222-8222-222222222222"
+    db = _FakeDB([
+        _Result(row=_row(
+            message_id="turn-1",
+            session_id="session-1",
+            space_id="33333333-3333-4333-8333-333333333333",
+            content="总结附件",
+        )),
+        _Result(rows=[_row(document_id=doc1), _row(document_id=doc2)]),
+    ])
+    _patch_session(monkeypatch, repo_module, "get_session", db)
+
+    claim = await ChatTurnRepository().claim_ready_answer(
+        turn_id="turn-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    assert claim is not None
+    assert claim.document_ids == [doc1, doc2]
+    assert claim.query == "总结附件"
+    assert db.context_entries == 1
+    claim_sql, params = db.calls[0]
+    assert "processing_status in ('waiting_files', 'answer_failed')" in claim_sql
+    assert "set processing_status = 'answering'" in claim_sql
+    assert "exists" in claim_sql
+    assert "not exists" in claim_sql
+    assert "d.status = 'indexed'" in claim_sql
+    assert "ma.ignored = false" in claim_sql
+    assert params["user_id"] == "user-1"
+    scope_sql, _ = db.calls[1]
+    assert "select distinct ma.document_id" in scope_sql
+    assert "d.status = 'indexed'" in scope_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_ready_answer_returns_none_when_another_request_claimed(
+    monkeypatch,
+) -> None:
+    db = _FakeDB([_Result(row=None)])
+    _patch_session(monkeypatch, repo_module, "get_session", db)
+
+    claim = await ChatTurnRepository().claim_ready_answer(
+        turn_id="turn-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    assert claim is None
+    assert len(db.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_claim_ready_answer_rejects_empty_scope_after_claim(monkeypatch) -> None:
+    db = _FakeDB([
+        _Result(row=_row(
+            message_id="turn-1",
+            session_id="session-1",
+            space_id="33333333-3333-4333-8333-333333333333",
+            content="总结附件",
+        )),
+        _Result(rows=[]),
+    ])
+    _patch_session(monkeypatch, repo_module, "get_session", db)
+
+    with pytest.raises(RuntimeError, match="文档范围"):
+        await ChatTurnRepository().claim_ready_answer(
+            turn_id="turn-1",
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_cancel_rejects_answering_or_completed_turn(monkeypatch) -> None:
     db = _FakeDB([_Result(row=None), _Result(row=None)])
     _patch_session(monkeypatch, repo_module, "get_session", db)

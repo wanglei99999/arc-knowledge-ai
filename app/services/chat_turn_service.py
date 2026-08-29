@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 from app.config.settings import settings
 from app.domain.chat_turn import (
+    AnswerClaim,
     AttachmentDeclaration,
     AttachmentStatus,
     AttachmentView,
@@ -17,6 +19,7 @@ from app.infrastructure.minio.client import build_object_key, upload_file
 from app.infrastructure.postgres.repositories.chat_turn_repo import ChatTurnRepository
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
+from app.services.chat_service import AttachmentAnswerRequest, ChatService
 from app.services.document_service import DocumentService, IngestRequest, IngestResult
 
 MAX_ATTACHMENTS = 5
@@ -75,6 +78,7 @@ class ChatTurnService:
         upload_file_fn: Callable[..., Awaitable[str | None]] | None = None,
         object_key_builder: Callable[[str, str, str, str], str] | None = None,
         max_file_size_bytes: int | None = None,
+        chat_service: ChatService | None = None,
     ) -> None:
         self._turn_repo = turn_repo or ChatTurnRepository()
         self._session_repo = session_repo or SessionRepository()
@@ -87,6 +91,7 @@ class ChatTurnService:
             if max_file_size_bytes is not None
             else settings.document_max_file_size_bytes
         )
+        self._chat_service = chat_service or ChatService()
 
     async def create_turn(
         self,
@@ -133,6 +138,74 @@ class ChatTurnService:
         if turn is None:
             raise ChatTurnNotFoundError("聊天轮次不存在")
         return turn
+
+    async def prepare_answer(
+        self, *, turn_id: str, tenant_id: str, user_id: str
+    ) -> AnswerClaim:
+        """在返回 SSE 响应前校验并原子抢占本轮回答权。"""
+        turn = await self.get_turn(
+            turn_id=turn_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if turn.readiness is not TurnReadiness.READY:
+            messages = {
+                TurnReadiness.INGESTING: "附件仍在处理中",
+                TurnReadiness.BLOCKED: "存在处理失败的附件，请重试或忽略",
+                TurnReadiness.EMPTY: "没有可用于回答的附件",
+            }
+            raise ChatTurnConflictError(messages[turn.readiness])
+        if turn.processing_status is TurnProcessingStatus.ANSWERING:
+            raise ChatTurnConflictError("当前聊天轮次正在回答")
+        if turn.processing_status is TurnProcessingStatus.COMPLETED:
+            raise ChatTurnConflictError("当前聊天轮次已经回答完成")
+        if turn.processing_status not in {
+            TurnProcessingStatus.WAITING_FILES,
+            TurnProcessingStatus.ANSWER_FAILED,
+        }:
+            raise ChatTurnConflictError("当前聊天轮次不能回答")
+
+        claim = await self._turn_repo.claim_ready_answer(
+            turn_id=turn_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if claim is None:
+            raise ChatTurnConflictError("聊天轮次状态已经变化，请刷新后重试")
+        return claim
+
+    async def stream_answer(
+        self, claim: AnswerClaim
+    ) -> AsyncIterator[str | list]:
+        """执行已抢占 Turn 的附件限定回答，并维护失败状态。"""
+        request = AttachmentAnswerRequest(
+            turn_id=claim.turn_id,
+            session_id=claim.session_id,
+            tenant_id=claim.tenant_id,
+            user_id=claim.user_id,
+            space_id=claim.space_id,
+            query=claim.query,
+            document_ids=claim.document_ids,
+        )
+        try:
+            async for item in self._chat_service.stream_attachment_answer(request):
+                yield item
+        except (asyncio.CancelledError, GeneratorExit):
+            await self._turn_repo.fail_answer(
+                turn_id=claim.turn_id,
+                tenant_id=claim.tenant_id,
+                user_id=claim.user_id,
+                error_message="回答连接已中断，请重试",
+            )
+            raise
+        except Exception as exc:
+            await self._turn_repo.fail_answer(
+                turn_id=claim.turn_id,
+                tenant_id=claim.tenant_id,
+                user_id=claim.user_id,
+                error_message="回答生成失败，请重试",
+            )
+            raise ChatTurnConflictError("回答生成失败，请重试") from exc
 
     async def upload_attachment(
         self,

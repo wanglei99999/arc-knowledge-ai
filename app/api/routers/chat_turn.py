@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import UserContext, require_user
@@ -24,6 +27,26 @@ from app.services.document_service import IngestResult
 
 router = APIRouter(prefix="/chat/turns", tags=["chat-turns"])
 _service = ChatTurnService()
+
+
+async def _answer_sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
+    """将附件回答 token、引用和安全错误包装为现有 SSE 协议。"""
+    try:
+        async for item in event_iter:
+            payload = (
+                {"citations": item}
+                if isinstance(item, list)
+                else {"delta": item}
+            )
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+    except ChatTurnError as exc:
+        payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
+        yield f"data: {payload}\n\n".encode()
+    except Exception:
+        payload = json.dumps({"error": "回答生成失败，请重试"}, ensure_ascii=False)
+        yield f"data: {payload}\n\n".encode()
+    finally:
+        yield b"data: [DONE]\n\n"
 
 
 class AttachmentDeclarationBody(BaseModel):
@@ -193,6 +216,26 @@ async def get_turn(
     except ChatTurnError as exc:
         _raise_http(exc)
     return ChatTurnOut.from_domain(turn)
+
+
+@router.post("/{turn_id}/answer")
+async def answer_turn(
+    turn_id: str,
+    user: UserContext = Depends(require_user),
+) -> StreamingResponse:
+    try:
+        claim = await _service.prepare_answer(
+            turn_id=turn_id,
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+        )
+    except ChatTurnError as exc:
+        _raise_http(exc)
+    return StreamingResponse(
+        _answer_sse_stream(_service.stream_answer(claim)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{turn_id}/attachments", response_model=ChatTurnOut)

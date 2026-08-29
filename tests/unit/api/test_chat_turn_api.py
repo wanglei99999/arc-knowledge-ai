@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -89,6 +90,20 @@ class _Service:
             _turn(), processing_status=TurnProcessingStatus.CANCELLED
         )
         return await self._result("cancel", kwargs, turn)
+
+    async def prepare_answer(self, **kwargs):
+        return await self._result("prepare_answer", kwargs, SimpleNamespace(
+            turn_id="turn-1",
+            session_id="session-1",
+            space_id="space-1",
+            query="总结附件",
+            document_ids=["document-1"],
+        ))
+
+    async def stream_answer(self, claim):
+        self.calls.append(("stream_answer", {"claim": claim}))
+        yield "回答"
+        yield [{"doc_id": "document-1"}]
 
 
 @pytest.fixture
@@ -211,3 +226,37 @@ def test_turn_endpoints_require_authenticated_user_in_production(monkeypatch) ->
     )
 
     assert response.status_code == 401
+
+
+def test_answer_endpoint_prepares_before_streaming_and_uses_existing_sse_shape(
+    api,
+) -> None:
+    client, service = api
+
+    response = client.post("/chat/turns/turn-1/answer")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.splitlines() == [
+        'data: {"delta": "回答"}',
+        "",
+        'data: {"citations": [{"doc_id": "document-1"}]}',
+        "",
+        "data: [DONE]",
+        "",
+    ]
+    assert [name for name, _ in service.calls] == [
+        "prepare_answer",
+        "stream_answer",
+    ]
+
+
+def test_answer_conflict_returns_http_409_before_sse_starts(api) -> None:
+    client, service = api
+    service.error = ChatTurnConflictError("当前聊天轮次正在回答")
+
+    response = client.post("/chat/turns/turn-1/answer")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "当前聊天轮次正在回答"
+    assert response.headers["content-type"].startswith("application/json")

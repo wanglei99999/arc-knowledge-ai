@@ -20,7 +20,7 @@ from app.infrastructure.milvus.memory_collection import (
     search_memory_vectors,
     upsert_memory_vector,
 )
-from app.infrastructure.postgres.repositories.citation_repo import CitationRepository
+from app.infrastructure.postgres.repositories.answer_repo import AnswerRepository
 from app.infrastructure.postgres.repositories.memory_repo import MemoryRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
@@ -84,10 +84,38 @@ def _format_conversation(messages: list[Message]) -> str:
 
 
 class MemoryExtractor:
-    def __init__(self) -> None:
-        self._session_repo  = SessionRepository()
-        self._memory_repo   = MemoryRepository()
-        self._citation_repo = CitationRepository()
+    def __init__(
+        self,
+        *,
+        answer_repo: AnswerRepository | None = None,
+        session_repo: SessionRepository | None = None,
+        memory_repo: MemoryRepository | None = None,
+    ) -> None:
+        self._answer_repo = answer_repo or AnswerRepository()
+        self._session_repo = session_repo or SessionRepository()
+        self._memory_repo = memory_repo or MemoryRepository()
+
+    async def persist_answer(
+        self,
+        *,
+        source_turn_id: str | None,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        assistant_response: str,
+        space_id: str | None,
+        citations: list[dict],
+    ) -> Message:
+        """同步持久化回答关键状态；失败必须向调用方传播。"""
+        return await self._answer_repo.save_assistant_with_citations(
+            source_turn_id=source_turn_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            content=assistant_response,
+            space_id=space_id,
+            citations=citations,
+        )
 
     async def run(
         self,
@@ -100,27 +128,41 @@ class MemoryExtractor:
         space_id: str | None = None,
         citations: list[dict] | None = None,
     ) -> None:
-        """统一入口：保存 assistant 消息 → 保存 citations → 压缩检查 → 提取记忆"""
+        """普通聊天后台入口：持久化回答后执行非关键记忆工作。"""
         try:
-            # 1. 保存 assistant 消息，拿到 message_id
-            msg = await self._session_repo.add_message(
+            message = await self.persist_answer(
+                source_turn_id=None,
                 session_id=session_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                role="assistant",
-                content=assistant_response,
+                assistant_response=assistant_response,
+                space_id=space_id,
+                citations=citations or [],
             )
+        except Exception:
+            logger.exception("Background answer persistence failed for session=%s", session_id)
+            return
+        await self.run_post_persist(
+            assistant_message=message,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            llm_provider_name=llm_provider_name,
+            embedding_provider_name=embedding_provider_name,
+        )
 
-            # 2. 持久化 RAG 引用来源
-            if citations:
-                await self._citation_repo.save(
-                    message_id=msg.message_id,
-                    tenant_id=tenant_id,
-                    space_id=space_id,
-                    citations=citations,
-                )
-
-            # 3. 获取当前 session
+    async def run_post_persist(
+        self,
+        *,
+        assistant_message: Message,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        llm_provider_name: str,
+        embedding_provider_name: str,
+    ) -> None:
+        """回答已落库后的非关键压缩和长期记忆提取。"""
+        try:
             session = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
             if session is None:
                 return
@@ -131,7 +173,7 @@ class MemoryExtractor:
             llm: LLMProvider = model_hub.get_provider(ctx)
             embed: EmbeddingProvider = registry.get_provider(embedding_provider_name)
 
-            # 4. 压缩检查（Layer 2）
+            # 1. 压缩检查（Layer 2）
             threshold = _compress_threshold(llm.get_context_window())
             if session.message_count >= threshold:
                 await self._compress(
@@ -143,7 +185,7 @@ class MemoryExtractor:
                     ctx=ctx,
                 )
 
-            # 5. 提取记忆（Layer 3）
+            # 2. 提取记忆（Layer 3）
             await self._extract(
                 session_id=session_id,
                 tenant_id=tenant_id,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from app.domain.metadata_filter import MetadataFilter
@@ -35,6 +36,22 @@ class ChatRequest:
     metadata_filters: list[MetadataFilter] = field(default_factory=list)  # 通用元数据过滤
 
 
+@dataclass(frozen=True)
+class AttachmentAnswerRequest:
+    turn_id: str
+    session_id: str
+    tenant_id: str
+    user_id: str
+    space_id: str
+    query: str
+    document_ids: list[str]
+    top_k: int = 10
+    score_threshold: float = 0.5
+    model: str | None = None
+    llm_provider_name: str = "openai_llm"
+    embedding_provider_name: str = "openai_embedding"
+
+
 class ChatService:
     """
     RAG 问答服务。
@@ -42,6 +59,19 @@ class ChatService:
     有 session_id + user_id → 三层记忆流程（工作记忆 + 语义记忆 + RAG）
     无 session_id            → 原有简单流程（history list + RAG），向后兼容
     """
+
+    def __init__(
+        self,
+        *,
+        orchestrator: RAGOrchestrator | None = None,
+        manager: MemoryManager | None = None,
+        assembler: ContextAssembler | None = None,
+        extractor: MemoryExtractor | None = None,
+    ) -> None:
+        self._orchestrator = orchestrator or _orchestrator
+        self._manager = manager or _manager
+        self._assembler = assembler or _assembler
+        self._extractor = extractor or _extractor
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[str | list]:
         if req.session_id and req.user_id:
@@ -74,7 +104,7 @@ class ChatService:
         assert req.session_id and req.user_id
 
         # 1. 保存用户消息（先写，使 Last-N 包含本条）
-        await _manager.save_user_message(
+        await self._manager.save_user_message(
             session_id=req.session_id,
             tenant_id=req.tenant_id,
             user_id=req.user_id,
@@ -83,14 +113,14 @@ class ChatService:
 
         # 2. 并行加载：工作记忆 + 语义记忆 + RAG 检索
         working_memory, semantic_memories, rag_result = await asyncio.gather(
-            _manager.load_working_memory(req.session_id, req.tenant_id, req.user_id),
-            _manager.load_semantic_memories(
+            self._manager.load_working_memory(req.session_id, req.tenant_id, req.user_id),
+            self._manager.load_semantic_memories(
                 tenant_id=req.tenant_id,
                 user_id=req.user_id,
                 query=req.query,
                 embedding_provider_name=req.embedding_provider_name,
             ),
-            _orchestrator.retrieve(
+            self._orchestrator.retrieve(
                 query_text=req.query,
                 tenant_id=req.tenant_id,
                 space_id=req.space_id,
@@ -102,11 +132,11 @@ class ChatService:
         )
 
         # 3. 经 ModelHub 获取 LLM（熔断降级 + allowed_models 校验，主模型取自租户配置）
-        ctx, llm = await _orchestrator.build_llm(req.tenant_id, req.model)
+        ctx, llm = await self._orchestrator.build_llm(req.tenant_id, req.model)
         context_window = llm.get_context_window()
 
         # 4. 组装 context
-        messages = _assembler.build(
+        messages = self._assembler.build(
             context_window=context_window,
             working_memory=working_memory,
             semantic_memories=semantic_memories,
@@ -126,7 +156,7 @@ class ChatService:
 
         # 7. 后台：保存 assistant 消息 + 保存 citations + 压缩 + 记忆提取
         asyncio.create_task(
-            _extractor.run(
+            self._extractor.run(
                 session_id=req.session_id,
                 tenant_id=req.tenant_id,
                 user_id=req.user_id,
@@ -138,10 +168,63 @@ class ChatService:
             )
         )
 
+    async def stream_attachment_answer(self, req) -> AsyncIterator[str | list]:
+        """回答已持久化的用户 Turn，只使用本轮附件作为事实来源。"""
+        working_memory, rag_result = await asyncio.gather(
+            self._manager.load_working_memory(
+                req.session_id, req.tenant_id, req.user_id
+            ),
+            self._orchestrator.retrieve(
+                query_text=req.query,
+                tenant_id=req.tenant_id,
+                space_id=req.space_id,
+                top_k=req.top_k,
+                score_threshold=req.score_threshold,
+                model=req.model,
+                metadata_filters=[],
+                document_ids=req.document_ids,
+            ),
+        )
+        ctx, llm = await self._orchestrator.build_llm(req.tenant_id, req.model)
+        messages = self._assembler.build(
+            context_window=llm.get_context_window(),
+            working_memory=working_memory,
+            semantic_memories=[],
+            rag_text=rag_result.context_text,
+            strict_sources=True,
+        )
+
+        response_parts: list[str] = []
+        async with aclosing(llm.stream_generate(ctx, messages)) as stream:
+            async for token in stream:
+                response_parts.append(token)
+                yield token
+
+        citations = self._build_citations(rag_result)
+        assistant_message = await self._extractor.persist_answer(
+            source_turn_id=req.turn_id,
+            session_id=req.session_id,
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            assistant_response="".join(response_parts),
+            space_id=req.space_id,
+            citations=citations,
+        )
+        asyncio.create_task(self._extractor.run_post_persist(
+            assistant_message=assistant_message,
+            session_id=req.session_id,
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            llm_provider_name=req.llm_provider_name,
+            embedding_provider_name=req.embedding_provider_name,
+        ))
+        if citations:
+            yield citations
+
     # ── 原有简单流程（向后兼容，无 session）─────────────────────────────────
 
     async def _stream_simple(self, req: ChatRequest) -> AsyncIterator[str | list]:
-        async for item in _orchestrator.chat(
+        async for item in self._orchestrator.chat(
             query=req.query,
             tenant_id=req.tenant_id,
             history=req.history,
