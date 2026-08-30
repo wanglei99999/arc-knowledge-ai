@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.dependencies import UserContext, require_user
-from app.infrastructure.postgres.repositories.citation_repo import CitationRepository
+from app.api.routers.chat_turn import AttachmentOut
 from app.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions", tags=["memory"])
@@ -28,7 +28,10 @@ class MessageOut(BaseModel):
     message_id: str
     role: str
     content: str
-    citations: list[dict] = []
+    processing_status: str | None = None
+    processing_error: str | None = None
+    attachments: list[AttachmentOut] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=SessionOut)
@@ -101,9 +104,6 @@ async def delete_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
 
-_citation_repo = CitationRepository()
-
-
 @router.get("/{session_id}/messages", response_model=list[MessageOut])
 async def get_messages(
     session_id: str,
@@ -111,14 +111,15 @@ async def get_messages(
     user: UserContext = Depends(require_user),
 ) -> list[MessageOut]:
     messages = await _service.get_messages(session_id, user.tenant_id, user.user_id, limit)
-    message_ids = [m.message_id for m in messages if m.role == "assistant"]
-    citations_map = await _citation_repo.get_by_message_ids(message_ids)
     return [
         MessageOut(
             message_id=m.message_id,
             role=m.role,
             content=m.content,
-            citations=citations_map.get(m.message_id, []),
+            processing_status=m.processing_status,
+            processing_error=m.processing_error,
+            attachments=[AttachmentOut.from_domain(item) for item in m.attachments],
+            citations=m.citations,
         )
         for m in messages
     ]

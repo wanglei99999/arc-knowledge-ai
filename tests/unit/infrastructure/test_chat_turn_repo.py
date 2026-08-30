@@ -454,6 +454,43 @@ async def test_claim_ready_answer_rejects_empty_scope_after_claim(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_get_attachments_by_message_ids_batches_and_tenant_scopes(
+    monkeypatch,
+) -> None:
+    db = _FakeDB([_Result(rows=[
+        _attachment_row(
+            message_id="turn-1",
+            document_id="document-1",
+            upload_status="uploaded",
+            document_status="indexed",
+        ),
+        _attachment_row(
+            message_id="turn-2",
+            attachment_id="attachment-2",
+            client_id="client-2",
+            file_name="appendix.pdf",
+        ),
+    ])])
+    _patch_session(monkeypatch, repo_module, "get_session", db)
+
+    grouped = await ChatTurnRepository().get_by_message_ids(
+        ["turn-1", "turn-2"], "tenant-1"
+    )
+
+    assert grouped["turn-1"][0].status is AttachmentStatus.INDEXED
+    assert grouped["turn-2"][0].status is AttachmentStatus.PENDING_UPLOAD
+    sql, params = db.calls[0]
+    assert "ma.message_id = any(:message_ids)" in sql
+    assert "ma.tenant_id = :tenant_id" in sql
+    assert "m.tenant_id = :tenant_id" in sql
+    assert "s.tenant_id = :tenant_id" in sql
+    assert params == {
+        "message_ids": ["turn-1", "turn-2"],
+        "tenant_id": "tenant-1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_cancel_rejects_answering_or_completed_turn(monkeypatch) -> None:
     db = _FakeDB([_Result(row=None), _Result(row=None)])
     _patch_session(monkeypatch, repo_module, "get_session", db)

@@ -68,7 +68,7 @@ class CitationRepository:
             await db.execute(sql, rows)
 
     async def get_by_message_ids(
-        self, message_ids: list[str]
+        self, message_ids: list[str], tenant_id: str
     ) -> dict[str, list[dict]]:
         """批量查询多条消息的 citations，返回 {message_id: [citation, ...]}。"""
         if not message_ids:
@@ -78,10 +78,14 @@ class CitationRepository:
                    retrieval_mode, content_snapshot, title_snapshot
             FROM message_citations
             WHERE message_id = ANY(:message_ids)
+              AND tenant_id = :tenant_id
             ORDER BY message_id, rank
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {"message_ids": message_ids})
+            result = await db.execute(sql, {
+                "message_ids": message_ids,
+                "tenant_id": tenant_id,
+            })
             rows = result.fetchall()
 
         grouped: dict[str, list[dict]] = {}
