@@ -155,6 +155,49 @@ class ChatTurnRepository:
                 user_id=user_id,
             )
 
+    async def get_by_message_ids(
+        self,
+        message_ids: list[str],
+        tenant_id: str,
+    ) -> dict[str, list[AttachmentView]]:
+        """批量加载历史消息附件，返回按 message_id 分组的状态视图。"""
+        if not message_ids:
+            return {}
+        async with get_session() as db:
+            result = await db.execute(text("""
+                SELECT ma.message_id, ma.attachment_id, ma.client_id,
+                       ma.file_name, ma.mime_type, ma.file_size,
+                       ma.document_id, ma.upload_status, ma.upload_error,
+                       ma.ignored, d.status AS document_status,
+                       d.error_message AS document_error
+                FROM message_attachments AS ma
+                JOIN messages AS m
+                  ON m.message_id = ma.message_id
+                 AND m.tenant_id = ma.tenant_id
+                JOIN sessions AS s
+                  ON s.session_id = m.session_id
+                 AND s.tenant_id = m.tenant_id
+                LEFT JOIN documents AS d
+                  ON d.id = ma.document_id
+                 AND d.tenant_id = ma.tenant_id
+                 AND d.space_id = ma.space_id
+                WHERE ma.message_id = ANY(:message_ids)
+                  AND ma.tenant_id = :tenant_id
+                  AND m.tenant_id = :tenant_id
+                  AND s.tenant_id = :tenant_id
+                ORDER BY ma.message_id, ma.created_at, ma.attachment_id
+            """), {
+                "message_ids": message_ids,
+                "tenant_id": tenant_id,
+            })
+            rows = result.fetchall()
+
+        grouped: dict[str, list[AttachmentView]] = {}
+        for row in rows:
+            message_id = str(row._mapping["message_id"])
+            grouped.setdefault(message_id, []).append(_row_to_attachment(row))
+        return grouped
+
     async def add_attachment(
         self,
         *,
