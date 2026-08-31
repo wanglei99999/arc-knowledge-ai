@@ -190,6 +190,7 @@ async def test_archived_query_joins_space_counts_and_maps_rows(monkeypatch) -> N
         assert "user_id = :user_id" in sql
     assert "join spaces" in list_sql
     assert "lower(s.title) like :query" in list_sql
+    assert "lower(sp.name) like :query" in list_sql
     assert "order by s.archived_at desc" in list_sql
     assert count_params["query"] == "%上传%"
     assert list_params["limit"] == 50
