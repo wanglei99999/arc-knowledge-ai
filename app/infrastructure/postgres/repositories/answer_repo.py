@@ -38,7 +38,7 @@ class AnswerRepository:
                     message_id, session_id, tenant_id, user_id,
                     role, content, token_count
                 )
-                SELECT :message_id, s.session_id, :tenant_id, :user_id,
+                SELECT :message_id, s.session_id, s.tenant_id, s.user_id,
                        'assistant', :content, 0
                 FROM sessions AS s
                 WHERE s.session_id = :session_id

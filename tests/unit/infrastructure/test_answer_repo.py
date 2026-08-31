@@ -42,6 +42,21 @@ class _FakeDB:
         return _Result(SimpleNamespace(_mapping={"ok": True}))
 
 
+class _PostgresTypeCheckingDB(_FakeDB):
+    """模拟 PostgreSQL 对 INSERT ... SELECT 重复参数的严格类型推断。"""
+
+    async def execute(self, statement, params=None):
+        sql = " ".join(str(statement).lower().split())
+        if (
+            "insert into messages" in sql
+            and "select :message_id, s.session_id, :tenant_id, :user_id" in sql
+        ):
+            raise RuntimeError(
+                "inconsistent types deduced for parameter: text versus character varying"
+            )
+        return await super().execute(statement, params)
+
+
 def _patch_db(monkeypatch, module, db: _FakeDB) -> None:
     @asynccontextmanager
     async def fake_get_db():
@@ -109,6 +124,31 @@ async def test_persist_answer_writes_all_critical_state_in_one_transaction(
     assert "processing_status = 'answering'" in completed_sql
     assert "m.tenant_id = :tenant_id" in completed_sql
     assert completed_params["source_turn_id"] == TURN_ID
+
+
+async def test_assistant_insert_reuses_identity_from_authorized_session(
+    monkeypatch,
+) -> None:
+    """租户和用户列取自已鉴权 session，避免 asyncpg 参数类型推断冲突。"""
+    from app.infrastructure.postgres.repositories import answer_repo as module
+    from app.infrastructure.postgres.repositories.answer_repo import AnswerRepository
+
+    db = _PostgresTypeCheckingDB()
+    _patch_db(monkeypatch, module, db)
+
+    message = await AnswerRepository().save_assistant_with_citations(
+        source_turn_id=TURN_ID,
+        session_id=SESSION_ID,
+        tenant_id="tenant-1",
+        user_id="user-1",
+        content="回答",
+        space_id=SPACE_ID,
+        citations=[],
+    )
+
+    assert message.role == "assistant"
+    assistant_sql, _ = db.calls[0]
+    assert "s.tenant_id, s.user_id" in assistant_sql
 
 
 async def test_persist_answer_rolls_back_when_citation_insert_fails(
