@@ -21,6 +21,31 @@ from app.infrastructure.postgres.client import get_session
 class ChatTurnRepository:
     """附件型聊天轮次的事务、读取和状态变更。"""
 
+    async def has_active_turn(
+        self,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+    ) -> bool:
+        sql = text("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM messages
+                WHERE session_id = :session_id
+                  AND tenant_id = :tenant_id
+                  AND user_id = :user_id
+                  AND role = 'user'
+                  AND processing_status IN ('waiting_files', 'answering')
+            )
+        """)
+        async with get_session() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            })
+            return bool(result.scalar_one())
+
     async def create_turn(
         self,
         *,

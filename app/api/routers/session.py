@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import UserContext, require_user
 from app.api.routers.chat_turn import AttachmentOut
-from app.services.session_service import SessionService
+from app.services.session_service import (
+    SessionBusyError,
+    SessionService,
+    SessionSpaceArchivedError,
+)
 
 router = APIRouter(prefix="/sessions", tags=["memory"])
 _service = SessionService()
@@ -32,6 +38,25 @@ class MessageOut(BaseModel):
     processing_error: str | None = None
     attachments: list[AttachmentOut] = Field(default_factory=list)
     citations: list[dict] = Field(default_factory=list)
+
+
+class SpaceSummaryOut(BaseModel):
+    space_id: str
+    name: str
+    status: str
+
+
+class ArchivedSessionOut(BaseModel):
+    session_id: str
+    title: str | None
+    message_count: int
+    archived_at: datetime
+    space: SpaceSummaryOut
+
+
+class ArchivedSessionPageOut(BaseModel):
+    items: list[ArchivedSessionOut]
+    total: int
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=SessionOut)
@@ -77,6 +102,41 @@ async def list_sessions(
     ]
 
 
+@router.get("/archived", response_model=ArchivedSessionPageOut)
+async def list_archived_sessions(
+    query: str | None = None,
+    space_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: UserContext = Depends(require_user),
+) -> ArchivedSessionPageOut:
+    page = await _service.list_archived(
+        user.tenant_id,
+        user.user_id,
+        query=query,
+        space_id=space_id,
+        limit=limit,
+        offset=offset,
+    )
+    return ArchivedSessionPageOut(
+        items=[
+            ArchivedSessionOut(
+                session_id=item.session_id,
+                title=item.title,
+                message_count=item.message_count,
+                archived_at=item.archived_at,
+                space=SpaceSummaryOut(
+                    space_id=item.space_id,
+                    name=item.space_name,
+                    status=item.space_status,
+                ),
+            )
+            for item in page.items
+        ],
+        total=page.total,
+    )
+
+
 @router.get("/{session_id}", response_model=SessionOut)
 async def get_session(
     session_id: str,
@@ -102,6 +162,54 @@ async def delete_session(
     deleted = await _service.delete(session_id, user.tenant_id, user.user_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+
+@router.post("/{session_id}/archive", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_session(
+    session_id: str,
+    user: UserContext = Depends(require_user),
+) -> None:
+    try:
+        archived = await _service.archive(
+            session_id, user.tenant_id, user.user_id
+        )
+    except SessionBusyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "SESSION_BUSY",
+                "message": "会话正在处理文件或生成回答，暂时无法归档",
+            },
+        ) from exc
+    if not archived:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+
+@router.post("/{session_id}/restore", status_code=status.HTTP_204_NO_CONTENT)
+async def restore_session(
+    session_id: str,
+    user: UserContext = Depends(require_user),
+) -> None:
+    try:
+        restored = await _service.restore(
+            session_id, user.tenant_id, user.user_id
+        )
+    except SessionSpaceArchivedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "SPACE_ARCHIVED",
+                "message": "请先恢复会话所属的知识空间",
+            },
+        ) from exc
+    if not restored:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageOut])
