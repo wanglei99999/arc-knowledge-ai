@@ -137,7 +137,9 @@ class SessionRepository:
             "user_id": user_id,
         }
         if query:
-            filters.append("LOWER(s.title) LIKE :query")
+            filters.append(
+                "(LOWER(s.title) LIKE :query OR LOWER(sp.name) LIKE :query)"
+            )
             params["query"] = f"%{query.lower()}%"
         if space_id:
             filters.append("s.space_id = :space_id")
