@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import text
 
-from app.domain.memory import Message, Session
+from app.domain.memory import ArchivedSession, Message, Session
 from app.infrastructure.postgres.client import get_session as get_db
 
 
@@ -46,7 +46,7 @@ class SessionRepository:
     ) -> Session | None:
         sql = text("""
             SELECT session_id, tenant_id, user_id, space_id, title, summary,
-                   message_count, created_at, updated_at
+                   message_count, archived_at, pinned_at, created_at, updated_at
             FROM sessions
             WHERE session_id = :session_id
               AND tenant_id  = :tenant_id
@@ -64,10 +64,13 @@ class SessionRepository:
     ) -> list[Session]:
         where_extra = "AND space_id = :space_id" if space_id else ""
         sql = text(f"""
-            SELECT session_id, tenant_id, user_id, title, summary,
-                message_count, created_at, updated_at
+            SELECT session_id, tenant_id, user_id, space_id, title, summary,
+                message_count, archived_at, pinned_at, created_at, updated_at
             FROM sessions
-            WHERE tenant_id = :tenant_id AND user_id = :user_id  {where_extra}
+            WHERE tenant_id = :tenant_id
+              AND user_id = :user_id
+              AND archived_at IS NULL
+              {where_extra}
             ORDER BY updated_at DESC
             LIMIT :limit OFFSET :offset
         """)
@@ -78,6 +81,99 @@ class SessionRepository:
             })
             rows = result.fetchall()
         return [_row_to_session(r) for r in rows]
+
+    async def archive(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        sql = text("""
+            UPDATE sessions
+            SET archived_at = COALESCE(archived_at, NOW()), pinned_at = NULL
+            WHERE session_id = :session_id
+              AND tenant_id = :tenant_id
+              AND user_id = :user_id
+        """)
+        async with get_db() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            })
+            return result.rowcount > 0
+
+    async def restore(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        sql = text("""
+            UPDATE sessions
+            SET archived_at = NULL
+            WHERE session_id = :session_id
+              AND tenant_id = :tenant_id
+              AND user_id = :user_id
+        """)
+        async with get_db() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            })
+            return result.rowcount > 0
+
+    async def list_archived(
+        self,
+        tenant_id: str,
+        user_id: str,
+        query: str | None,
+        space_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ArchivedSession], int]:
+        filters = [
+            "s.tenant_id = :tenant_id",
+            "s.user_id = :user_id",
+            "s.archived_at IS NOT NULL",
+        ]
+        params: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+        if query:
+            filters.append("LOWER(s.title) LIKE :query")
+            params["query"] = f"%{query.lower()}%"
+        if space_id:
+            filters.append("s.space_id = :space_id")
+            params["space_id"] = space_id
+
+        where_clause = " AND ".join(filters)
+        join_clause = """
+            JOIN spaces sp
+              ON sp.id = s.space_id
+             AND sp.tenant_id = s.tenant_id
+        """
+        count_sql = text(f"""
+            SELECT COUNT(*)
+            FROM sessions s
+            {join_clause}
+            WHERE {where_clause}
+        """)
+        list_sql = text(f"""
+            SELECT s.session_id, s.space_id, sp.name AS space_name,
+                   sp.status AS space_status, s.title, s.message_count,
+                   s.archived_at
+            FROM sessions s
+            {join_clause}
+            WHERE {where_clause}
+            ORDER BY s.archived_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+
+        async with get_db() as db:
+            count_result = await db.execute(count_sql, params)
+            total = int(count_result.scalar_one())
+            list_params = {**params, "limit": limit, "offset": offset}
+            result = await db.execute(list_sql, list_params)
+            rows = result.fetchall()
+
+        return [_row_to_archived_session(row) for row in rows], total
 
     async def delete(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         sql = text("""
@@ -261,8 +357,23 @@ def _row_to_session(row) -> Session:
         title=r.get("title"),
         summary=r.get("summary"),
         message_count=r.get("message_count", 0),
+        archived_at=r.get("archived_at"),
+        pinned_at=r.get("pinned_at"),
         created_at=r["created_at"],
         updated_at=r["updated_at"],
+    )
+
+
+def _row_to_archived_session(row) -> ArchivedSession:
+    r = dict(row._mapping)
+    return ArchivedSession(
+        session_id=str(r["session_id"]),
+        space_id=str(r["space_id"]),
+        space_name=r["space_name"],
+        space_status=r["space_status"],
+        title=r.get("title"),
+        message_count=r.get("message_count", 0),
+        archived_at=r["archived_at"],
     )
 
 

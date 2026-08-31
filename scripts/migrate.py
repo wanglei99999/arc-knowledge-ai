@@ -150,15 +150,32 @@ CREATE TABLE IF NOT EXISTS sessions (
     summary_up_to UUID,
     -- 摘要截止到哪条 message_id
     message_count INTEGER      NOT NULL DEFAULT 0,
+    archived_at   TIMESTAMPTZ,
+    pinned_at     TIMESTAMPTZ,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+
+-- CREATE TABLE IF NOT EXISTS 不会给旧表补列，因此保留显式增量迁移。
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user
     ON sessions (tenant_id, user_id, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_space
     ON sessions (space_id);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_active_space
+    ON sessions (tenant_id, user_id, space_id, updated_at DESC)
+    WHERE archived_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_archived_user
+    ON sessions (tenant_id, user_id, archived_at DESC)
+    WHERE archived_at IS NOT NULL;
 
 -- ── 消息表 ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (

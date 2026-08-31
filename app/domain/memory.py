@@ -22,8 +22,23 @@ class Session:
     title: str | None = None
     summary: str | None = None       # Layer 2 情节记忆：中间段压缩摘要
     message_count: int = 0
+    archived_at: datetime | None = None
+    pinned_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass(frozen=True)
+class ArchivedSession:
+    """归档中心使用的会话与原空间只读投影。"""
+
+    session_id: str
+    space_id: str
+    space_name: str
+    space_status: str
+    title: str | None
+    message_count: int
+    archived_at: datetime
 
 
 @dataclass
