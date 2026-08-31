@@ -85,18 +85,28 @@ async def parse_activity(inp: IngestionInput) -> dict:
     tmp.close()
 
     try:
-        # 流式下载：内存只占一个 chunk（1MB），不受文件大小影响
-        await download_file_to_path(inp.file_path, tmp.name)
-        activity.heartbeat("downloaded")
+        try:
+            # 流式下载：内存只占一个 chunk（1MB），不受文件大小影响
+            await download_file_to_path(inp.file_path, tmp.name)
+            activity.heartbeat("downloaded")
 
-        raw_file = RawFile(
-            file_path=tmp.name,
-            mime_type=inp.mime_type,
-            original_filename=inp.original_filename,
-        )
-        parser_stage = registry.get_stage("parser")
-        parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
-        activity.heartbeat("parsed")
+            raw_file = RawFile(
+                file_path=tmp.name,
+                mime_type=inp.mime_type,
+                original_filename=inp.original_filename,
+            )
+            parser_stage = registry.get_stage("parser")
+            parsed: ParsedDocument = await parser_stage.execute(ctx, raw_file)
+            activity.heartbeat("parsed")
+        except Exception as exc:
+            repo = ChunkRepository()
+            await repo.update_document_status(
+                inp.document_id,
+                inp.tenant_id,
+                DocumentStatus.FAILED,
+                error_message=f"文档解析失败：{type(exc).__name__}: {exc}",
+            )
+            raise RuntimeError(f"{type(exc).__name__}: {exc}") from None
 
         # 空文本 Guard
         if not parsed.text.strip():
