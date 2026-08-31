@@ -35,6 +35,20 @@ def _row_to_space(row: object) -> Space:
 
 class SpaceRepository:
 
+    async def get_by_id(self, tenant_id: str, space_id: str) -> Space | None:
+        sql = text("""
+            SELECT id, tenant_id, space_key, name, status, created_by, created_at
+            FROM spaces
+            WHERE id = :space_id AND tenant_id = :tenant_id
+        """)
+        async with get_session() as db:
+            result = await db.execute(sql, {
+                'tenant_id': tenant_id,
+                'space_id': space_id,
+            })
+            row = result.one_or_none()
+            return _row_to_space(row) if row else None
+
     async def list_by_tenant(self, tenant_id: str) -> list[Space]:
         sql = text("""
             SELECT id, tenant_id, space_key, name, status, created_by, created_at

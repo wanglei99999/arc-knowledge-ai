@@ -4,16 +4,31 @@ import asyncio
 from dataclasses import dataclass
 
 from app.domain.chat_turn import AttachmentView
-from app.domain.memory import Session
+from app.domain.memory import ArchivedSession, Session
 from app.infrastructure.postgres.repositories.chat_turn_repo import ChatTurnRepository
 from app.infrastructure.postgres.repositories.citation_repo import CitationRepository
 from app.infrastructure.postgres.repositories.memory_repo import MemoryRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
+from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
+
+
+class SessionBusyError(Exception):
+    """会话仍有文件等待或回答生成任务，暂时不能归档。"""
+
+
+class SessionSpaceArchivedError(Exception):
+    """会话的原空间未处于可恢复状态。"""
 
 
 @dataclass
 class SessionListResult:
     sessions: list[Session]
+    total: int
+
+
+@dataclass(frozen=True)
+class ArchivedSessionPage:
+    items: list[ArchivedSession]
     total: int
 
 
@@ -38,11 +53,13 @@ class SessionService:
         memory_repo: MemoryRepository | None = None,
         citation_repo: CitationRepository | None = None,
         attachment_repo: ChatTurnRepository | None = None,
+        space_repo: SpaceRepository | None = None,
     ) -> None:
         self._session_repo = session_repo or SessionRepository()
         self._memory_repo = memory_repo or MemoryRepository()
         self._citation_repo = citation_repo or CitationRepository()
         self._attachment_repo = attachment_repo or ChatTurnRepository()
+        self._space_repo = space_repo or SpaceRepository()
 
     async def create(
         self,
@@ -73,6 +90,56 @@ class SessionService:
         if deleted:
             await self._memory_repo.delete_by_session(session_id)
         return deleted
+
+    async def archive(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        owned = await self._session_repo.get_by_id(
+            session_id, tenant_id, user_id
+        )
+        if owned is None:
+            return False
+        if await self._attachment_repo.has_active_turn(
+            session_id, tenant_id, user_id
+        ):
+            raise SessionBusyError
+        return await self._session_repo.archive(session_id, tenant_id, user_id)
+
+    async def restore(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        owned = await self._session_repo.get_by_id(
+            session_id, tenant_id, user_id
+        )
+        if owned is None:
+            return False
+        space = (
+            await self._space_repo.get_by_id(tenant_id, owned.space_id)
+            if owned.space_id is not None
+            else None
+        )
+        if space is None or space.status != "active":
+            raise SessionSpaceArchivedError
+        return await self._session_repo.restore(session_id, tenant_id, user_id)
+
+    async def list_archived(
+        self,
+        tenant_id: str,
+        user_id: str,
+        query: str | None,
+        space_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> ArchivedSessionPage:
+        items, total = await self._session_repo.list_archived(
+            tenant_id,
+            user_id,
+            query=query,
+            space_id=space_id,
+            limit=limit,
+            offset=offset,
+        )
+        return ArchivedSessionPage(items=items, total=total)
 
     async def get_messages(
         self, session_id: str, tenant_id: str, user_id: str, limit: int = 50
