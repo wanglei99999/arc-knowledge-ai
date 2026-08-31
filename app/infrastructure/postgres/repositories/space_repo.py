@@ -116,6 +116,19 @@ class SpaceRepository:
             await db.commit()
             return result.rowcount > 0
 
+    async def restore(self, tenant_id: str, space_id: str) -> bool:
+        sql = text("""
+            UPDATE spaces SET status = 'active', updated_at = NOW()
+            WHERE id = :space_id AND tenant_id = :tenant_id
+        """)
+        async with get_session() as db:
+            result = await db.execute(sql, {
+                'tenant_id': tenant_id,
+                'space_id': space_id,
+            })
+            await db.commit()
+            return result.rowcount > 0
+
     async def ensure_default(self, tenant_id: str) -> Space:
         """幂等：保证默认空间存在"""
         existing = await self.find_by_key(tenant_id, 'default')

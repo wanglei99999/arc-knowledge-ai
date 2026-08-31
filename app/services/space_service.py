@@ -3,10 +3,11 @@ from __future__ import annotations
 from app.domain.space import Space
 from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
 
+
 class SpaceService:
 
-    def __init__(self) -> None:
-        self._repo = SpaceRepository()
+    def __init__(self, repo: SpaceRepository | None = None) -> None:
+        self._repo = repo or SpaceRepository()
 
     async def list_spaces(self, tenant_id: str) -> list[Space]:
         return await self._repo.list_by_tenant(tenant_id)
@@ -21,3 +22,6 @@ class SpaceService:
 
     async def delete_space(self, tenant_id: str, space_id: str) -> bool:
         return await self._repo.archive(tenant_id, space_id)
+
+    async def restore_space(self, tenant_id: str, space_id: str) -> bool:
+        return await self._repo.restore(tenant_id, space_id)

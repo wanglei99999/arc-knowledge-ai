@@ -13,9 +13,10 @@ from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
 
 
 class _Result:
-    def __init__(self, *, row=None, scalar=None) -> None:
+    def __init__(self, *, row=None, scalar=None, rowcount: int = 0) -> None:
         self._row = row
         self._scalar = scalar
+        self.rowcount = rowcount
 
     def one_or_none(self):
         return self._row
@@ -28,10 +29,14 @@ class _FakeDB:
     def __init__(self, result: _Result) -> None:
         self.result = result
         self.calls: list[tuple[str, object]] = []
+        self.commits = 0
 
     async def execute(self, statement, params=None):
         self.calls.append((" ".join(str(statement).lower().split()), params))
         return self.result
+
+    async def commit(self):
+        self.commits += 1
 
 
 def _patch_db(monkeypatch, module, db: _FakeDB) -> None:
@@ -90,3 +95,20 @@ async def test_space_lookup_is_tenant_scoped_and_maps_archived_status(
     assert "id = :space_id" in sql
     assert "tenant_id = :tenant_id" in sql
     assert params == {"tenant_id": "tenant-1", "space_id": "space-1"}
+
+
+@pytest.mark.asyncio
+async def test_space_restore_is_tenant_scoped_and_idempotent(monkeypatch) -> None:
+    db = _FakeDB(_Result(rowcount=1))
+    _patch_db(monkeypatch, space_module, db)
+
+    restored = await SpaceRepository().restore("tenant-1", "space-1")
+
+    assert restored is True
+    sql, params = db.calls[0]
+    assert "set status = 'active', updated_at = now()" in sql
+    assert "id = :space_id" in sql
+    assert "tenant_id = :tenant_id" in sql
+    assert "status = 'archived'" not in sql
+    assert params == {"tenant_id": "tenant-1", "space_id": "space-1"}
+    assert db.commits == 1
