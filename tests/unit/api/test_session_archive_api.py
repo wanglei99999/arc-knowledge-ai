@@ -8,10 +8,11 @@ from fastapi.testclient import TestClient
 
 from app.api.dependencies import UserContext, require_user
 from app.api.routers import session as session_router
-from app.domain.memory import ArchivedSession
+from app.domain.memory import ArchivedSession, Session
 from app.services.session_service import (
     ArchivedSessionPage,
     SessionBusyError,
+    SessionListResult,
     SessionSpaceArchivedError,
 )
 
@@ -20,6 +21,8 @@ class _Service:
     def __init__(self) -> None:
         self.archive_result = True
         self.restore_result = True
+        self.pin_result = True
+        self.unpin_result = True
         self.error: Exception | None = None
         self.calls: list[tuple[str, tuple, dict]] = []
 
@@ -34,6 +37,28 @@ class _Service:
         if self.error:
             raise self.error
         return self.restore_result
+
+    async def pin(self, *args):
+        self.calls.append(("pin", args, {}))
+        return self.pin_result
+
+    async def unpin(self, *args):
+        self.calls.append(("unpin", args, {}))
+        return self.unpin_result
+
+    async def list(self, *args, **kwargs):
+        self.calls.append(("list", args, kwargs))
+        return SessionListResult(
+            sessions=[Session(
+                session_id="session-1",
+                tenant_id="tenant-1",
+                user_id="user-1",
+                space_id="space-1",
+                title="接入鉴权方案",
+                pinned_at=datetime(2026, 9, 1, 2, 30, tzinfo=UTC),
+            )],
+            total=1,
+        )
 
     async def list_archived(self, *args, **kwargs):
         self.calls.append(("list_archived", args, kwargs))
@@ -110,6 +135,35 @@ def test_restore_archived_space_returns_structured_409(api) -> None:
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "SPACE_ARCHIVED"
+
+
+def test_pin_and_unpin_return_204_with_authenticated_owner(api) -> None:
+    client, service = api
+
+    assert client.post("/sessions/session-1/pin").status_code == 204
+    assert client.post("/sessions/session-1/unpin").status_code == 204
+    assert service.calls == [
+        ("pin", ("session-1", "tenant-1", "user-1"), {}),
+        ("unpin", ("session-1", "tenant-1", "user-1"), {}),
+    ]
+
+
+def test_pin_unknown_or_archived_session_returns_404(api) -> None:
+    client, service = api
+    service.pin_result = False
+
+    response = client.post("/sessions/missing/pin")
+
+    assert response.status_code == 404
+
+
+def test_active_session_list_exposes_pin_timestamp(api) -> None:
+    client, _ = api
+
+    response = client.get("/sessions?space_id=space-1")
+
+    assert response.status_code == 200
+    assert response.json()[0]["pinned_at"] == "2026-09-01T02:30:00Z"
 
 
 def test_archived_list_uses_static_route_and_returns_space_summary(api) -> None:

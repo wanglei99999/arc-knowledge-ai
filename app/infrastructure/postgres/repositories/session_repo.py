@@ -71,7 +71,7 @@ class SessionRepository:
               AND user_id = :user_id
               AND archived_at IS NULL
               {where_extra}
-            ORDER BY updated_at DESC
+            ORDER BY pinned_at DESC NULLS LAST, updated_at DESC
             LIMIT :limit OFFSET :offset
         """)
         async with get_db() as db:
@@ -109,6 +109,44 @@ class SessionRepository:
             WHERE session_id = :session_id
               AND tenant_id = :tenant_id
               AND user_id = :user_id
+        """)
+        async with get_db() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            })
+            return result.rowcount > 0
+
+    async def pin(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        sql = text("""
+            UPDATE sessions
+            SET pinned_at = COALESCE(pinned_at, NOW())
+            WHERE session_id = :session_id
+              AND tenant_id = :tenant_id
+              AND user_id = :user_id
+              AND archived_at IS NULL
+        """)
+        async with get_db() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            })
+            return result.rowcount > 0
+
+    async def unpin(
+        self, session_id: str, tenant_id: str, user_id: str
+    ) -> bool:
+        sql = text("""
+            UPDATE sessions
+            SET pinned_at = NULL
+            WHERE session_id = :session_id
+              AND tenant_id = :tenant_id
+              AND user_id = :user_id
+              AND archived_at IS NULL
         """)
         async with get_db() as db:
             result = await db.execute(sql, {

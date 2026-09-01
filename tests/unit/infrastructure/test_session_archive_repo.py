@@ -77,6 +77,17 @@ async def test_active_list_filters_archived_sessions(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_active_list_orders_recently_pinned_sessions_first(monkeypatch) -> None:
+    db = _FakeDB([_Result(rows=[])])
+    _patch_session(monkeypatch, db)
+
+    await SessionRepository().list("tenant-1", "user-1", space_id="space-1")
+
+    sql, _ = db.calls[0]
+    assert "order by pinned_at desc nulls last, updated_at desc" in sql
+
+
+@pytest.mark.asyncio
 async def test_session_lookup_maps_archive_and_pin_timestamps(monkeypatch) -> None:
     archived_at = datetime(2026, 8, 21, 9, 30, tzinfo=UTC)
     pinned_at = datetime(2026, 8, 20, 8, 0, tzinfo=UTC)
@@ -141,6 +152,46 @@ async def test_restore_is_owned_and_idempotent(monkeypatch) -> None:
     assert "set archived_at = null" in sql
     assert "tenant_id = :tenant_id" in sql
     assert "user_id = :user_id" in sql
+    assert params == {
+        "session_id": "session-1",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pin_is_owned_idempotent_and_active_only(monkeypatch) -> None:
+    db = _FakeDB([_Result(rowcount=1)])
+    _patch_session(monkeypatch, db)
+
+    changed = await SessionRepository().pin(
+        "session-1", "tenant-1", "user-1"
+    )
+
+    assert changed is True
+    sql, params = db.calls[0]
+    assert "pinned_at = coalesce(pinned_at, now())" in sql
+    assert "archived_at is null" in sql
+    assert params == {
+        "session_id": "session-1",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_unpin_is_owned_and_idempotent(monkeypatch) -> None:
+    db = _FakeDB([_Result(rowcount=1)])
+    _patch_session(monkeypatch, db)
+
+    changed = await SessionRepository().unpin(
+        "session-1", "tenant-1", "user-1"
+    )
+
+    assert changed is True
+    sql, params = db.calls[0]
+    assert "set pinned_at = null" in sql
+    assert "archived_at is null" in sql
     assert params == {
         "session_id": "session-1",
         "tenant_id": "tenant-1",

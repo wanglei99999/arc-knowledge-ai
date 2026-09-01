@@ -28,6 +28,7 @@ class SessionOut(BaseModel):
     title: str | None
     summary: str | None
     message_count: int
+    pinned_at: datetime | None
 
 
 class MessageOut(BaseModel):
@@ -76,6 +77,7 @@ async def create_session(
         title=session.title,
         summary=session.summary,
         message_count=session.message_count,
+        pinned_at=session.pinned_at,
     )
 
 
@@ -97,6 +99,7 @@ async def list_sessions(
             title=s.title,
             summary=s.summary,
             message_count=s.message_count,
+            pinned_at=s.pinned_at,
         )
         for s in result.sessions
     ]
@@ -151,6 +154,7 @@ async def get_session(
         title=session.title,
         summary=session.summary,
         message_count=session.message_count,
+        pinned_at=session.pinned_at,
     )
 
 
@@ -206,6 +210,34 @@ async def restore_session(
             },
         ) from exc
     if not restored:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+
+@router.post("/{session_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
+async def pin_session(
+    session_id: str,
+    user: UserContext = Depends(require_user),
+) -> None:
+    pinned = await _service.pin(session_id, user.tenant_id, user.user_id)
+    if not pinned:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+
+@router.post("/{session_id}/unpin", status_code=status.HTTP_204_NO_CONTENT)
+async def unpin_session(
+    session_id: str,
+    user: UserContext = Depends(require_user),
+) -> None:
+    unpinned = await _service.unpin(
+        session_id, user.tenant_id, user.user_id
+    )
+    if not unpinned:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",
