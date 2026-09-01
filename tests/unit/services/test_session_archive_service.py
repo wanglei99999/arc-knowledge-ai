@@ -20,6 +20,8 @@ class _SessionRepository:
         )
         self.archive_result = True
         self.restore_result = True
+        self.pin_result = True
+        self.unpin_result = True
         self.archived_items = [
             ArchivedSession(
                 session_id="session-1",
@@ -44,6 +46,14 @@ class _SessionRepository:
     async def restore(self, *args):
         self.calls.append(("restore", args, {}))
         return self.restore_result
+
+    async def pin(self, *args):
+        self.calls.append(("pin", args, {}))
+        return self.pin_result
+
+    async def unpin(self, *args):
+        self.calls.append(("unpin", args, {}))
+        return self.unpin_result
 
     async def list_archived(self, *args, **kwargs):
         self.calls.append(("list_archived", args, kwargs))
@@ -165,6 +175,34 @@ async def test_restore_delegates_after_loading_active_original_space() -> None:
     assert space_repo.calls == [("tenant-1", "space-1")]
     assert session_repo.calls[-1] == (
         "restore",
+        ("session-1", "tenant-1", "user-1"),
+        {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_pin_delegates_with_owned_scope() -> None:
+    service, session_repo, _, _ = _service()
+
+    result = await service.pin("session-1", "tenant-1", "user-1")
+
+    assert result is True
+    assert session_repo.calls[-1] == (
+        "pin",
+        ("session-1", "tenant-1", "user-1"),
+        {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_unpin_delegates_with_owned_scope() -> None:
+    service, session_repo, _, _ = _service()
+
+    result = await service.unpin("session-1", "tenant-1", "user-1")
+
+    assert result is True
+    assert session_repo.calls[-1] == (
+        "unpin",
         ("session-1", "tenant-1", "user-1"),
         {},
     )
