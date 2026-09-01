@@ -231,6 +231,47 @@ async def test_unpin_is_owned_and_idempotent(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rename_updates_only_an_owned_active_session_without_reordering(monkeypatch) -> None:
+    updated_at = datetime(2026, 8, 31, tzinfo=UTC)
+    session_row = _row(
+        session_id="session-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        space_id="space-1",
+        title="新的标题",
+        summary=None,
+        message_count=2,
+        archived_at=None,
+        pinned_at=None,
+        created_at=datetime(2026, 8, 20, tzinfo=UTC),
+        updated_at=updated_at,
+    )
+    db = _FakeDB([_Result(row=session_row)])
+    _patch_session(monkeypatch, db)
+
+    renamed = await SessionRepository().rename(
+        "session-1", "tenant-1", "user-1", "新的标题"
+    )
+
+    assert renamed is not None
+    assert renamed.title == "新的标题"
+    assert renamed.updated_at == updated_at
+    sql, params = db.calls[0]
+    assert "set title = :title" in sql
+    assert "updated_at" not in sql.split("where", 1)[0]
+    assert "tenant_id = :tenant_id" in sql
+    assert "user_id = :user_id" in sql
+    assert "archived_at is null" in sql
+    assert "returning session_id" in sql
+    assert params == {
+        "session_id": "session-1",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "title": "新的标题",
+    }
+
+
+@pytest.mark.asyncio
 async def test_archived_query_joins_space_counts_and_maps_rows(monkeypatch) -> None:
     archived_at = datetime(2026, 8, 21, 9, 30, tzinfo=UTC)
     archived_row = _row(

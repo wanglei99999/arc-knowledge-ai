@@ -60,7 +60,12 @@ class SessionRepository:
         return _row_to_session(row) if row else None
 
     async def list(
-        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0, space_id: str | None = None,
+        self,
+        tenant_id: str,
+        user_id: str,
+        limit: int = 20,
+        offset: int = 0,
+        space_id: str | None = None,
     ) -> list[Session]:
         where_extra = "AND space_id = :space_id" if space_id else ""
         sql = text(f"""
@@ -158,6 +163,33 @@ class SessionRepository:
                 "session_id": session_id,
                 "tenant_id": tenant_id,
                 "user_id": user_id,
+            })
+            row = result.one_or_none()
+            return _row_to_session(row) if row else None
+
+    async def rename(
+        self,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        title: str,
+    ) -> Session | None:
+        sql = text("""
+            UPDATE sessions
+            SET title = :title
+            WHERE session_id = :session_id
+              AND tenant_id = :tenant_id
+              AND user_id = :user_id
+              AND archived_at IS NULL
+            RETURNING session_id, tenant_id, user_id, space_id, title, summary,
+                      message_count, archived_at, pinned_at, created_at, updated_at
+        """)
+        async with get_db() as db:
+            result = await db.execute(sql, {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "title": title,
             })
             row = result.one_or_none()
             return _row_to_session(row) if row else None

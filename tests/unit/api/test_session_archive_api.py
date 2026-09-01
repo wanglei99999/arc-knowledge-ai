@@ -37,6 +37,13 @@ class _Service:
             title="接入鉴权方案",
             pinned_at=None,
         )
+        self.rename_result = Session(
+            session_id="session-1",
+            tenant_id="tenant-1",
+            user_id="user-1",
+            space_id="space-1",
+            title="新的标题",
+        )
         self.error: Exception | None = None
         self.calls: list[tuple[str, tuple, dict]] = []
 
@@ -59,6 +66,10 @@ class _Service:
     async def unpin(self, *args):
         self.calls.append(("unpin", args, {}))
         return self.unpin_result
+
+    async def rename(self, *args):
+        self.calls.append(("rename", args, {}))
+        return self.rename_result
 
     async def list(self, *args, **kwargs):
         self.calls.append(("list", args, kwargs))
@@ -174,6 +185,43 @@ def test_pin_unknown_or_archived_session_returns_404(api) -> None:
     service.pin_result = None
 
     response = client.post("/sessions/missing/pin")
+
+    assert response.status_code == 404
+
+
+def test_rename_trims_title_and_returns_authoritative_session(api) -> None:
+    client, service = api
+
+    response = client.patch(
+        "/sessions/session-1", json={"title": "  新的标题  "}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "新的标题"
+    assert service.calls == [(
+        "rename",
+        ("session-1", "tenant-1", "user-1", "新的标题"),
+        {},
+    )]
+
+
+@pytest.mark.parametrize("title", ["   ", "x" * 101])
+def test_rename_rejects_invalid_title_without_calling_service(api, title) -> None:
+    client, service = api
+
+    response = client.patch("/sessions/session-1", json={"title": title})
+
+    assert response.status_code == 422
+    assert service.calls == []
+
+
+def test_rename_unknown_or_archived_session_returns_404(api) -> None:
+    client, service = api
+    service.rename_result = None
+
+    response = client.patch(
+        "/sessions/missing", json={"title": "新的标题"}
+    )
 
     assert response.status_code == 404
 
