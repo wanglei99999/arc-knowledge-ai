@@ -6,7 +6,6 @@ import pytest
 
 from app.domain.memory import ArchivedSession, Session
 from app.domain.space import Space
-from app.services import session_service as service_module
 from app.services.session_service import SessionService
 
 
@@ -22,6 +21,7 @@ class _SessionRepository:
         self.restore_result = True
         self.pin_result = True
         self.unpin_result = True
+        self.rename_result = self.owned
         self.archived_items = [
             ArchivedSession(
                 session_id="session-1",
@@ -54,6 +54,10 @@ class _SessionRepository:
     async def unpin(self, *args):
         self.calls.append(("unpin", args, {}))
         return self.unpin_result
+
+    async def rename(self, *args):
+        self.calls.append(("rename", args, {}))
+        return self.rename_result
 
     async def list_archived(self, *args, **kwargs):
         self.calls.append(("list_archived", args, kwargs))
@@ -204,6 +208,22 @@ async def test_unpin_delegates_with_owned_scope() -> None:
     assert session_repo.calls[-1] == (
         "unpin",
         ("session-1", "tenant-1", "user-1"),
+        {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_rename_delegates_with_owned_scope_and_title() -> None:
+    service, session_repo, _, _ = _service()
+
+    result = await service.rename(
+        "session-1", "tenant-1", "user-1", "新的标题"
+    )
+
+    assert result is session_repo.rename_result
+    assert session_repo.calls[-1] == (
+        "rename",
+        ("session-1", "tenant-1", "user-1", "新的标题"),
         {},
     )
 

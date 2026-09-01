@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies import UserContext, require_user
 from app.api.routers.chat_turn import AttachmentOut
@@ -20,6 +20,15 @@ _service = SessionService()
 class CreateSessionBody(BaseModel):
     title: str | None = None
     space_id: str | None = None
+
+
+class RenameSessionBody(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class SessionOut(BaseModel):
@@ -163,6 +172,32 @@ async def get_session(
         pinned_at=session.pinned_at,
         created_at=session.created_at,
         updated_at=session.updated_at,
+    )
+
+
+@router.patch("/{session_id}", response_model=SessionOut)
+async def rename_session(
+    session_id: str,
+    body: RenameSessionBody,
+    user: UserContext = Depends(require_user),
+) -> SessionOut:
+    renamed = await _service.rename(
+        session_id, user.tenant_id, user.user_id, body.title
+    )
+    if not renamed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+    return SessionOut(
+        session_id=renamed.session_id,
+        space_id=renamed.space_id,
+        title=renamed.title,
+        summary=renamed.summary,
+        message_count=renamed.message_count,
+        pinned_at=renamed.pinned_at,
+        created_at=renamed.created_at,
+        updated_at=renamed.updated_at,
     )
 
 

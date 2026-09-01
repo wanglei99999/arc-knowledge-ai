@@ -132,6 +132,17 @@ class SessionService:
     ) -> Session | None:
         return await self._session_repo.unpin(session_id, tenant_id, user_id)
 
+    async def rename(
+        self,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        title: str,
+    ) -> Session | None:
+        return await self._session_repo.rename(
+            session_id, tenant_id, user_id, title
+        )
+
     async def list_archived(
         self,
         tenant_id: str,
