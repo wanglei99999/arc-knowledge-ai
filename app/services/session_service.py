@@ -124,12 +124,12 @@ class SessionService:
 
     async def pin(
         self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    ) -> Session | None:
         return await self._session_repo.pin(session_id, tenant_id, user_id)
 
     async def unpin(
         self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    ) -> Session | None:
         return await self._session_repo.unpin(session_id, tenant_id, user_id)
 
     async def list_archived(
