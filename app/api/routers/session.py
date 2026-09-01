@@ -29,6 +29,8 @@ class SessionOut(BaseModel):
     summary: str | None
     message_count: int
     pinned_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class MessageOut(BaseModel):
@@ -78,6 +80,8 @@ async def create_session(
         summary=session.summary,
         message_count=session.message_count,
         pinned_at=session.pinned_at,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
     )
 
 
@@ -100,6 +104,8 @@ async def list_sessions(
             summary=s.summary,
             message_count=s.message_count,
             pinned_at=s.pinned_at,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
         )
         for s in result.sessions
     ]
@@ -155,6 +161,8 @@ async def get_session(
         summary=session.summary,
         message_count=session.message_count,
         pinned_at=session.pinned_at,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
     )
 
 
@@ -216,24 +224,34 @@ async def restore_session(
         )
 
 
-@router.post("/{session_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{session_id}/pin", response_model=SessionOut)
 async def pin_session(
     session_id: str,
     user: UserContext = Depends(require_user),
-) -> None:
+) -> SessionOut:
     pinned = await _service.pin(session_id, user.tenant_id, user.user_id)
     if not pinned:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",
         )
+    return SessionOut(
+        session_id=pinned.session_id,
+        space_id=pinned.space_id,
+        title=pinned.title,
+        summary=pinned.summary,
+        message_count=pinned.message_count,
+        pinned_at=pinned.pinned_at,
+        created_at=pinned.created_at,
+        updated_at=pinned.updated_at,
+    )
 
 
-@router.post("/{session_id}/unpin", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{session_id}/unpin", response_model=SessionOut)
 async def unpin_session(
     session_id: str,
     user: UserContext = Depends(require_user),
-) -> None:
+) -> SessionOut:
     unpinned = await _service.unpin(
         session_id, user.tenant_id, user.user_id
     )
@@ -242,6 +260,16 @@ async def unpin_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",
         )
+    return SessionOut(
+        session_id=unpinned.session_id,
+        space_id=unpinned.space_id,
+        title=unpinned.title,
+        summary=unpinned.summary,
+        message_count=unpinned.message_count,
+        pinned_at=unpinned.pinned_at,
+        created_at=unpinned.created_at,
+        updated_at=unpinned.updated_at,
+    )
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageOut])

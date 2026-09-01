@@ -84,7 +84,7 @@ async def test_active_list_orders_recently_pinned_sessions_first(monkeypatch) ->
     await SessionRepository().list("tenant-1", "user-1", space_id="space-1")
 
     sql, _ = db.calls[0]
-    assert "order by pinned_at desc nulls last, updated_at desc" in sql
+    assert "order by pinned_at desc nulls last, updated_at desc, session_id desc" in sql
 
 
 @pytest.mark.asyncio
@@ -161,16 +161,32 @@ async def test_restore_is_owned_and_idempotent(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_pin_is_owned_idempotent_and_active_only(monkeypatch) -> None:
-    db = _FakeDB([_Result(rowcount=1)])
+    pinned_at = datetime(2026, 9, 1, 2, 30, tzinfo=UTC)
+    session_row = _row(
+        session_id="session-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        space_id="space-1",
+        title="接入鉴权方案",
+        summary=None,
+        message_count=2,
+        archived_at=None,
+        pinned_at=pinned_at,
+        created_at=datetime(2026, 8, 20, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 31, tzinfo=UTC),
+    )
+    db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    changed = await SessionRepository().pin(
+    pinned = await SessionRepository().pin(
         "session-1", "tenant-1", "user-1"
     )
 
-    assert changed is True
+    assert pinned is not None
+    assert pinned.pinned_at == pinned_at
     sql, params = db.calls[0]
     assert "pinned_at = coalesce(pinned_at, now())" in sql
+    assert "returning session_id" in sql
     assert "archived_at is null" in sql
     assert params == {
         "session_id": "session-1",
@@ -181,16 +197,31 @@ async def test_pin_is_owned_idempotent_and_active_only(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_unpin_is_owned_and_idempotent(monkeypatch) -> None:
-    db = _FakeDB([_Result(rowcount=1)])
+    session_row = _row(
+        session_id="session-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        space_id="space-1",
+        title="接入鉴权方案",
+        summary=None,
+        message_count=2,
+        archived_at=None,
+        pinned_at=None,
+        created_at=datetime(2026, 8, 20, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 31, tzinfo=UTC),
+    )
+    db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    changed = await SessionRepository().unpin(
+    unpinned = await SessionRepository().unpin(
         "session-1", "tenant-1", "user-1"
     )
 
-    assert changed is True
+    assert unpinned is not None
+    assert unpinned.pinned_at is None
     sql, params = db.calls[0]
     assert "set pinned_at = null" in sql
+    assert "returning session_id" in sql
     assert "archived_at is null" in sql
     assert params == {
         "session_id": "session-1",

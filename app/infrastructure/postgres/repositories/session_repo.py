@@ -71,7 +71,7 @@ class SessionRepository:
               AND user_id = :user_id
               AND archived_at IS NULL
               {where_extra}
-            ORDER BY pinned_at DESC NULLS LAST, updated_at DESC
+            ORDER BY pinned_at DESC NULLS LAST, updated_at DESC, session_id DESC
             LIMIT :limit OFFSET :offset
         """)
         async with get_db() as db:
@@ -120,7 +120,7 @@ class SessionRepository:
 
     async def pin(
         self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    ) -> Session | None:
         sql = text("""
             UPDATE sessions
             SET pinned_at = COALESCE(pinned_at, NOW())
@@ -128,6 +128,8 @@ class SessionRepository:
               AND tenant_id = :tenant_id
               AND user_id = :user_id
               AND archived_at IS NULL
+            RETURNING session_id, tenant_id, user_id, space_id, title, summary,
+                      message_count, archived_at, pinned_at, created_at, updated_at
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
@@ -135,11 +137,12 @@ class SessionRepository:
                 "tenant_id": tenant_id,
                 "user_id": user_id,
             })
-            return result.rowcount > 0
+            row = result.one_or_none()
+            return _row_to_session(row) if row else None
 
     async def unpin(
         self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    ) -> Session | None:
         sql = text("""
             UPDATE sessions
             SET pinned_at = NULL
@@ -147,6 +150,8 @@ class SessionRepository:
               AND tenant_id = :tenant_id
               AND user_id = :user_id
               AND archived_at IS NULL
+            RETURNING session_id, tenant_id, user_id, space_id, title, summary,
+                      message_count, archived_at, pinned_at, created_at, updated_at
         """)
         async with get_db() as db:
             result = await db.execute(sql, {
@@ -154,7 +159,8 @@ class SessionRepository:
                 "tenant_id": tenant_id,
                 "user_id": user_id,
             })
-            return result.rowcount > 0
+            row = result.one_or_none()
+            return _row_to_session(row) if row else None
 
     async def list_archived(
         self,
