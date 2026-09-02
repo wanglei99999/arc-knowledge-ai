@@ -901,6 +901,23 @@ function Show-IncipitLogs {
     Invoke-IncipitDocker -Arguments $arguments
 }
 
+function Invoke-IncipitSmoke {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('L0', 'L1')]
+        [string]$Level = 'L1'
+    )
+
+    $arguments = @(
+        'compose', 'exec', '-T', 'api',
+        'python', 'scripts/runtime/smoke.py',
+        '--level', $Level.ToLowerInvariant(),
+        '--api-base-url', 'http://api:8000',
+        '--web-base-url', 'http://web'
+    )
+    Invoke-IncipitDocker -Arguments $arguments
+}
+
 Export-ModuleMember -Function @(
     'Invoke-IncipitDocker',
     'Test-IncipitCommand',
@@ -923,5 +940,6 @@ Export-ModuleMember -Function @(
     'Start-Incipit',
     'Stop-Incipit',
     'Get-IncipitStatus',
-    'Show-IncipitLogs'
+    'Show-IncipitLogs',
+    'Invoke-IncipitSmoke'
 )
