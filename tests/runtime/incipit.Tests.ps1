@@ -40,6 +40,11 @@ Describe 'Get-IncipitOverallState' {
 
 Describe 'Invoke-IncipitDoctor' {
     BeforeEach {
+        $doctorRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $doctorRoot
+        Copy-Item (Join-Path $repoRoot 'docker-compose.yml') $doctorRoot
+        Copy-Item (Join-Path $repoRoot '.env.example') $doctorRoot
+
         Mock Test-IncipitCommand { $true } -ModuleName Incipit.Runtime
         Mock Test-IncipitPort { $false } -ModuleName Incipit.Runtime
         Mock Get-IncipitDockerDiskAvailableBytes { 50GB } -ModuleName Incipit.Runtime
@@ -64,7 +69,7 @@ Describe 'Invoke-IncipitDoctor' {
             return 'ok'
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $dockerCheck = $checks | Where-Object Name -eq 'docker-engine'
 
         $dockerCheck.Required | Should -Be $true
@@ -83,7 +88,7 @@ Describe 'Invoke-IncipitDoctor' {
             }
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $memoryCheck = $checks | Where-Object Name -eq 'docker-memory'
 
         $memoryCheck.Required | Should -Be $true
@@ -96,7 +101,7 @@ Describe 'Invoke-IncipitDoctor' {
             return $Port -eq 8000
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $portCheck = $checks | Where-Object Name -eq 'port:8000'
 
         $portCheck.Required | Should -Be $true
@@ -119,7 +124,7 @@ Describe 'Invoke-IncipitDoctor' {
             }
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $portCheck = $checks | Where-Object Name -eq 'port:8000'
 
         $portCheck.State | Should -Be 'PASS'
@@ -127,14 +132,14 @@ Describe 'Invoke-IncipitDoctor' {
     }
 
     It 'returns no required failures on a clean mocked machine' {
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $requiredFailures = @($checks | Where-Object { $_.Required -and $_.State -eq 'FAIL' })
 
         $requiredFailures.Count | Should -Be 0
     }
 
     It 'gives the exact recovery command when .env is missing' {
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $envCheck = $checks | Where-Object Name -eq 'env-file'
 
         $envCheck.Required | Should -Be $false
@@ -171,7 +176,7 @@ Describe 'Invoke-IncipitDoctor' {
             }
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $composeCheck = $checks | Where-Object Name -eq 'compose-config'
 
         $composeCheck.Required | Should -Be $true
@@ -182,7 +187,7 @@ Describe 'Invoke-IncipitDoctor' {
     It 'fails when available Docker disk is less than 20 GiB' {
         Mock Get-IncipitDockerDiskAvailableBytes { 19GB } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $diskCheck = $checks | Where-Object Name -eq 'docker-disk'
 
         $diskCheck.Required | Should -Be $true
@@ -201,14 +206,14 @@ Describe 'Invoke-IncipitDoctor' {
             }
         } -ModuleName Incipit.Runtime
 
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
 
         ($checks | Where-Object Name -eq 'docker-memory').State | Should -Be 'WARN'
         ($checks | Where-Object Name -eq 'docker-disk').State | Should -Be 'WARN'
     }
 
     It 'maps host.docker.internal to loopback for host-side model probes' {
-        $null = Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot
+        $null = Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot
 
         Should -Invoke Test-IncipitPort -Times 2 -Exactly -ModuleName Incipit.Runtime -ParameterFilter {
             $HostName -eq '127.0.0.1' -and $Port -eq 11434
@@ -216,7 +221,7 @@ Describe 'Invoke-IncipitDoctor' {
     }
 
     It 'warns about every empty offline cache in full mode' {
-        $checks = @(Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot -Full)
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot -Full)
         $cacheWarnings = @($checks | Where-Object {
             $_.Name -in @('infinity-model-cache', 'paddleocr-model-cache', 'huggingface-model-cache') -and
             $_.State -eq 'WARN'
@@ -229,7 +234,7 @@ Describe 'Invoke-IncipitDoctor' {
     }
 
     It 'emits parseable JSON in JSON mode' {
-        $json = Invoke-IncipitDoctor -RootPath $repoRoot -FrontendPath $repoRoot -Json
+        $json = Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot -Json
         $payload = @($json | ConvertFrom-Json)
 
         $payload.Count | Should -BeGreaterThan 0
