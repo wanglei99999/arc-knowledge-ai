@@ -502,3 +502,27 @@ Describe 'incipit.ps1 dispatcher' {
         $source | Should Match "'logs'\s+\{ Show-IncipitLogs"
     }
 }
+
+Describe 'Invoke-IncipitSmoke' {
+    It 'runs L0 inside the API container with service-network URLs' {
+        $global:IncipitSmokeArguments = @()
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+            $global:IncipitSmokeArguments = $Arguments
+            return '{"level":"L0","status":"PASS"}'
+        } -ModuleName Incipit.Runtime
+
+        $output = Invoke-IncipitSmoke -Level L0
+
+        ($global:IncipitSmokeArguments -join ' ') | Should Be 'compose exec -T api python scripts/runtime/smoke.py --level l0 --api-base-url http://api:8000 --web-base-url http://web'
+        $output | Should Match '"status":"PASS"'
+    }
+
+    It 'passes smoke credentials to the API container through Compose' {
+        $compose = Get-Content (Join-Path $repoRoot 'docker-compose.yml') -Raw
+
+        $compose | Should Match 'SMOKE_TENANT_ID:'
+        $compose | Should Match 'SMOKE_EMAIL:'
+        $compose | Should Match 'SMOKE_PASSWORD:'
+    }
+}
