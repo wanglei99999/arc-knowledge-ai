@@ -11,7 +11,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.middleware.rate_limit import RateLimitMiddleware
-from app.api.routers import admin, auth, chat, chat_turn, document, search, session, spaces
+from app.api.routers import admin, auth, chat, chat_turn, document, ops, search, session, spaces
 from app.config.settings import settings
 from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
@@ -103,11 +103,7 @@ app.include_router(chat_turn.router)
 app.include_router(admin.router)
 app.include_router(session.router)
 app.include_router(spaces.router)
-
-
-@app.get("/health", tags=["ops"])
-async def health() -> dict:
-    return {"status": "ok", "env": settings.app_env}
+app.include_router(ops.router)
 
 
 @app.get("/metrics", tags=["ops"], include_in_schema=False)

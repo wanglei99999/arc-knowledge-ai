@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # ── 应用 ──────────────────────────────────────────────────────────────────
     app_env: str = "development"
     log_level: str = "INFO"
+    runtime_probe_timeout_seconds: float = 3.0
+    runtime_optional_services: str = ""
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
     postgres_url: str = "postgresql+asyncpg://arc:arc@localhost:5432/arc_knowledge"
