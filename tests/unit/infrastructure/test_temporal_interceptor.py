@@ -4,10 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 from temporalio.contrib.opentelemetry import TracingInterceptor
 
+from app.config.settings import settings
 from app.services.document_service import DocumentService
 
 
-async def test_temporal_client_gets_tracing_interceptor():
+async def test_temporal_client_gets_tracing_interceptor(monkeypatch):
+    monkeypatch.setattr(settings, "otel_enabled", True)
     with patch("app.services.document_service.Client") as mock_client:
         mock_client.connect = AsyncMock()
         await DocumentService()._get_temporal_client()
@@ -16,8 +18,6 @@ async def test_temporal_client_gets_tracing_interceptor():
 
 
 async def test_interceptor_skipped_when_otel_disabled(monkeypatch):
-    from app.config.settings import settings
-
     monkeypatch.setattr(settings, "otel_enabled", False)
     with patch("app.services.document_service.Client") as mock_client:
         mock_client.connect = AsyncMock()
