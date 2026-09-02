@@ -1,0 +1,99 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.12.5
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Lint R0 runtime code
+        run: >-
+          uv run ruff check
+          scripts/runtime
+          app/api/routers/ops.py
+          app/infrastructure/health.py
+          app/services/readiness_service.py
+          tests/runtime
+          tests/unit/scripts
+
+      - name: Run backend and runtime contract tests
+        run: >-
+          uv run pytest -q
+          tests/unit
+          tests/runtime/test_backend_container_contract.py
+          tests/runtime/test_compose_contract.py
+
+  compose:
+    name: Compose contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare standalone checkout
+        run: |
+          cp .env.example .env
+          mkdir -p ../arc-knowledge-web
+
+      - name: Validate core Compose configuration
+        run: docker compose config --quiet
+
+      - name: Validate full Compose configuration
+        run: >-
+          docker compose
+          --profile rerank
+          --profile ocr
+          --profile observe
+          config --quiet
+
+  image:
+    name: Backend production image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: incipit-api:ci
+
+  powershell:
+    name: PowerShell runtime tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module Pester -Force -Scope CurrentUser -RequiredVersion 5.6.1
+
+      - name: Run runtime command tests
+        shell: pwsh
+        run: Invoke-Pester tests/runtime/incipit.Tests.ps1 -CI -Output Detailed
