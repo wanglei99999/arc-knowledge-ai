@@ -237,3 +237,268 @@ Describe 'Invoke-IncipitDoctor' {
         ($payload[0].PSObject.Properties.Name -contains 'Detail') | Should Be $true
     }
 }
+
+Describe 'Task 6 profile arguments' {
+    It 'uses no optional profile arguments for core startup' {
+        @(Get-IncipitProfileArguments).Count | Should Be 0
+        Get-IncipitOptionalServices | Should Be ''
+    }
+
+    It 'maps Full to every optional profile' {
+        $arguments = @(Get-IncipitProfileArguments -Full)
+
+        ($arguments -join ' ') | Should Be '--profile rerank --profile ocr --profile observe'
+        Get-IncipitOptionalServices -Full | Should Be 'rerank,ocr,observe'
+    }
+}
+
+Describe 'Start-Incipit state machine' {
+    BeforeEach {
+        $global:IncipitStartEvents = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-IncipitDoctor {
+            $global:IncipitStartEvents.Add('doctor')
+            return [pscustomobject]@{ Required = $true; State = 'PASS' }
+        } -ModuleName Incipit.Runtime
+        Mock Build-IncipitImages { $global:IncipitStartEvents.Add('build') } -ModuleName Incipit.Runtime
+        Mock Start-IncipitInfrastructure { $global:IncipitStartEvents.Add('start-infrastructure') } -ModuleName Incipit.Runtime
+        Mock Wait-IncipitInfrastructure { $global:IncipitStartEvents.Add('wait-infrastructure') } -ModuleName Incipit.Runtime
+        Mock Invoke-IncipitMigration { $global:IncipitStartEvents.Add('migrate') } -ModuleName Incipit.Runtime
+        Mock Start-IncipitApplications { $global:IncipitStartEvents.Add('start-applications') } -ModuleName Incipit.Runtime
+        Mock Get-IncipitStatus { $global:IncipitStartEvents.Add('status') } -ModuleName Incipit.Runtime
+    }
+
+    It 'runs migration only after infrastructure is healthy and before applications' {
+        Start-Incipit
+
+        ($global:IncipitStartEvents -join ',') | Should Be 'doctor,build,start-infrastructure,wait-infrastructure,migrate,start-applications,status'
+        Assert-MockCalled Invoke-IncipitMigration 1 -ModuleName Incipit.Runtime -Scope It
+        Assert-MockCalled Start-IncipitApplications 1 -ModuleName Incipit.Runtime -Scope It
+    }
+
+    It 'stops before building when doctor has a required failure' {
+        Mock Invoke-IncipitDoctor {
+            return [pscustomobject]@{ Required = $true; State = 'FAIL' }
+        } -ModuleName Incipit.Runtime
+
+        { Start-Incipit } | Should Throw 'Doctor found required failures'
+        Assert-MockCalled Build-IncipitImages 0 -ModuleName Incipit.Runtime -Scope It
+    }
+
+    It 'forwards every optional profile during Full startup' {
+        $global:IncipitFullProfileArguments = @()
+        Mock Build-IncipitImages {
+            param([string[]]$ProfileArguments)
+            $global:IncipitFullProfileArguments = $ProfileArguments
+            $global:IncipitStartEvents.Add('build')
+        } -ModuleName Incipit.Runtime
+
+        Start-Incipit -Full
+
+        ($global:IncipitFullProfileArguments -join ' ') | Should Be '--profile rerank --profile ocr --profile observe'
+        $env:INCIPIT_OPTIONAL_SERVICES | Should Be 'rerank,ocr,observe'
+    }
+}
+
+Describe 'Start-IncipitApplications ordering' {
+    BeforeEach {
+        $global:IncipitApplicationEvents = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+            $global:IncipitApplicationEvents.Add(($Arguments -join ' '))
+        } -ModuleName Incipit.Runtime
+        Mock Wait-IncipitHttp {
+            param([string]$Uri)
+            if ($Uri -match '/ready$') {
+                $global:IncipitApplicationEvents.Add('wait-api')
+            }
+            else {
+                $global:IncipitApplicationEvents.Add('wait-web')
+            }
+        } -ModuleName Incipit.Runtime
+        Mock Wait-IncipitWorker {
+            $global:IncipitApplicationEvents.Add('wait-worker')
+        } -ModuleName Incipit.Runtime
+    }
+
+    It 'waits for API before worker and worker before web' {
+        Start-IncipitApplications -ProfileArguments @()
+
+        ($global:IncipitApplicationEvents -join ',') | Should Be 'compose up -d api,wait-api,compose up -d worker,wait-worker,compose up -d web,wait-web'
+    }
+}
+
+Describe 'Task 6 bounded waits' {
+    It 'returns immediately for an accepted HTTP status' {
+        Mock Invoke-IncipitHttpRequest {
+            return [pscustomobject]@{ StatusCode = 200; Content = '{}' }
+        } -ModuleName Incipit.Runtime
+
+        (Wait-IncipitHttp -Uri 'http://127.0.0.1:8000/ready' -TimeoutSeconds 0).StatusCode | Should Be 200
+    }
+
+    It 'throws after the HTTP deadline instead of waiting forever' {
+        Mock Invoke-IncipitHttpRequest { throw 'connection refused' } -ModuleName Incipit.Runtime
+
+        { Wait-IncipitHttp -Uri 'http://127.0.0.1:8000/ready' -TimeoutSeconds 0 } | Should Throw 'Timed out waiting for'
+    }
+
+    It 'parses both JSON arrays and line-delimited Compose records' {
+        $arrayRecords = @(ConvertFrom-IncipitComposePs '[{"Service":"postgres","State":"running","Health":"healthy"}]')
+        $lineRecords = @(ConvertFrom-IncipitComposePs "{`"Service`":`"postgres`",`"State`":`"running`",`"Health`":`"healthy`"}`n{`"Service`":`"redis`",`"State`":`"running`",`"Health`":`"healthy`"}")
+
+        $arrayRecords.Count | Should Be 1
+        $lineRecords.Count | Should Be 2
+        $lineRecords[1].Service | Should Be 'redis'
+    }
+
+    It 'ignores native Docker warnings around valid JSON records' {
+        $output = "WARNING: credential helper unavailable`n{`"Service`":`"postgres`",`"State`":`"running`",`"Health`":`"healthy`"}"
+
+        $records = @(ConvertFrom-IncipitComposePs $output)
+
+        $records.Count | Should Be 1
+        $records[0].Service | Should Be 'postgres'
+    }
+
+    It 'turns an optional service timeout into a named warning' {
+        Mock Get-IncipitComposeRecords { return @() } -ModuleName Incipit.Runtime
+        Mock Show-IncipitWaitDiagnostics {} -ModuleName Incipit.Runtime
+
+        $warnings = @(Wait-IncipitServices -Services @('infinity') -TimeoutSeconds 0 -Optional)
+
+        $warnings.Count | Should Be 1
+        $warnings[0].Name | Should Be 'container:infinity'
+        $warnings[0].Required | Should Be $false
+        $warnings[0].State | Should Be 'WARN'
+    }
+
+    It 'terminates on a required service timeout' {
+        Mock Get-IncipitComposeRecords { return @() } -ModuleName Incipit.Runtime
+        Mock Show-IncipitWaitDiagnostics {} -ModuleName Incipit.Runtime
+
+        { Wait-IncipitServices -Services @('postgres') -TimeoutSeconds 0 } | Should Throw 'required services: postgres'
+    }
+
+    It 'accepts a running healthy worker probe' {
+        Mock Invoke-IncipitDocker {
+            return '{"name":"worker","ok":true,"detail":"1 workflow poller"}'
+        } -ModuleName Incipit.Runtime
+
+        $probe = Wait-IncipitWorker -TimeoutSeconds 0
+
+        $probe.ok | Should Be $true
+        $probe.detail | Should Be '1 workflow poller'
+    }
+}
+
+Describe 'Stop-Incipit' {
+    It 'removes containers and orphans without deleting named volumes' {
+        $global:IncipitStopArguments = @()
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+            $global:IncipitStopArguments = $Arguments
+        } -ModuleName Incipit.Runtime
+
+        Stop-Incipit
+
+        ($global:IncipitStopArguments -join ' ') | Should Be 'compose down --remove-orphans'
+        ($global:IncipitStopArguments -contains '--volumes') | Should Be $false
+        ($global:IncipitStopArguments -contains '-v') | Should Be $false
+    }
+}
+
+Describe 'Get-IncipitStatus' {
+    It 'returns parseable STOPPED JSON when no managed containers exist' {
+        Mock Get-IncipitComposeRecords { return @() } -ModuleName Incipit.Runtime
+
+        $status = Get-IncipitStatus -Json | ConvertFrom-Json
+
+        $status.status | Should Be 'STOPPED'
+        @($status.checks).Count | Should Be 0
+    }
+
+    It 'reports a Compose query failure as UNHEALTHY instead of STOPPED' {
+        Mock Get-IncipitComposeRecords { throw 'Docker engine unavailable' } -ModuleName Incipit.Runtime
+
+        $status = Get-IncipitStatus -Json | ConvertFrom-Json
+
+        $status.status | Should Be 'UNHEALTHY'
+        $status.checks[0].name | Should Be 'compose-state'
+        $status.checks[0].state | Should Be 'FAIL'
+    }
+
+    It 'combines containers HTTP readiness dependencies worker and web' {
+        $requiredServices = @(
+            'postgres', 'minio', 'etcd', 'milvus', 'elasticsearch', 'redis',
+            'temporal', 'temporal-ui', 'api', 'worker', 'web'
+        )
+        $global:IncipitStatusRecords = @($requiredServices | ForEach-Object {
+            [pscustomobject]@{ Service = $_; State = 'running'; Health = 'healthy' }
+        })
+        Mock Get-IncipitComposeRecords { return $global:IncipitStatusRecords } -ModuleName Incipit.Runtime
+        Mock Invoke-IncipitHttpRequest {
+            param([string]$Uri)
+            if ($Uri -match '/ready$') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '{"status":"degraded","checks":[{"name":"llm","required":false,"status":"failed","detail":"connection refused"}]}'
+                }
+            }
+            return [pscustomobject]@{ StatusCode = 200; Content = '{"status":"ok"}' }
+        } -ModuleName Incipit.Runtime
+        Mock Invoke-IncipitDocker {
+            return '{"name":"worker","ok":true,"detail":"1 workflow poller"}'
+        } -ModuleName Incipit.Runtime
+
+        $status = Get-IncipitStatus -Json | ConvertFrom-Json
+        $llmCheck = $status.checks | Where-Object name -eq 'llm'
+        $workerCheck = $status.checks | Where-Object name -eq 'worker-poller'
+
+        $status.status | Should Be 'DEGRADED'
+        $llmCheck.required | Should Be $false
+        $llmCheck.state | Should Be 'WARN'
+        $workerCheck.state | Should Be 'PASS'
+    }
+}
+
+Describe 'Show-IncipitLogs' {
+    It 'maps a followed service log request to tail 200 and follow' {
+        $global:IncipitLogArguments = @()
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+            $global:IncipitLogArguments = $Arguments
+        } -ModuleName Incipit.Runtime
+
+        Show-IncipitLogs -Service api -Follow
+
+        ($global:IncipitLogArguments -join ' ') | Should Be 'compose logs --tail 200 --follow api'
+    }
+
+    It 'shows base services plus unhealthy containers when no service is named' {
+        $global:IncipitLogArguments = @()
+        Mock Get-IncipitComposeRecords {
+            return @(
+                [pscustomobject]@{ Service = 'api'; State = 'running'; Health = 'healthy' }
+                [pscustomobject]@{ Service = 'postgres'; State = 'exited'; Health = 'unhealthy' }
+            )
+        } -ModuleName Incipit.Runtime
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+            $global:IncipitLogArguments = $Arguments
+        } -ModuleName Incipit.Runtime
+
+        Show-IncipitLogs
+
+        ($global:IncipitLogArguments -join ' ') | Should Be 'compose logs --tail 100 api worker web temporal postgres'
+    }
+}
+
+Describe 'incipit.ps1 dispatcher' {
+    It 'exposes the stable runtime commands' {
+        $source = Get-Content (Join-Path $repoRoot 'incipit.ps1') -Raw
+
+        $source | Should Match "ValidateSet\('doctor', 'start', 'stop', 'status', 'logs', 'smoke'\)"
+        $source | Should Match "'start'\s+\{ Start-Incipit"
+        $source | Should Match "'logs'\s+\{ Show-IncipitLogs"
+    }
+}

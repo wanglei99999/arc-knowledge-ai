@@ -1,5 +1,14 @@
 Set-StrictMode -Version Latest
 
+$script:CoreInfrastructureServices = @(
+    'postgres', 'minio', 'etcd', 'milvus', 'elasticsearch',
+    'redis', 'temporal', 'temporal-ui'
+)
+$script:OptionalServices = @(
+    'infinity', 'paddleocr', 'mineru', 'prometheus', 'grafana', 'phoenix'
+)
+$script:ApplicationServices = @('api', 'worker', 'web')
+
 function New-IncipitCheck {
     param(
         [Parameter(Mandatory)] [string]$Name,
@@ -357,10 +366,562 @@ function Invoke-IncipitDoctor {
     return $result
 }
 
+function Get-IncipitProfileArguments {
+    param([switch]$Full)
+
+    if (-not $Full) {
+        return @()
+    }
+    return @('--profile', 'rerank', '--profile', 'ocr', '--profile', 'observe')
+}
+
+function Get-IncipitOptionalServices {
+    param([switch]$Full)
+
+    if ($Full) {
+        return 'rerank,ocr,observe'
+    }
+    return ''
+}
+
+function Get-IncipitConfiguredValue {
+    param(
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [string]$Default,
+        [string]$RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+
+    $fileValues = Read-IncipitEnvFile -Path (Join-Path $RootPath '.env')
+    if ($fileValues.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace([string]$fileValues[$Name])) {
+        return [string]$fileValues[$Name]
+    }
+    return $Default
+}
+
+function Invoke-IncipitHttpRequest {
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [int]$TimeoutSeconds = 5
+    )
+
+    return Invoke-WebRequest `
+        -Uri $Uri `
+        -UseBasicParsing `
+        -TimeoutSec $TimeoutSeconds `
+        -SkipHttpErrorCheck
+}
+
+function Wait-IncipitHttp {
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [int]$TimeoutSeconds = 180,
+        [int[]]$AcceptedStatus = @(200)
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $response = Invoke-IncipitHttpRequest -Uri $Uri -TimeoutSeconds 5
+            if ([int]$response.StatusCode -in $AcceptedStatus) {
+                return $response
+            }
+        }
+        catch {
+            # A bounded wait treats connection failures as a not-ready state.
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            break
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Timed out waiting for $Uri after $TimeoutSeconds seconds"
+}
+
+function ConvertFrom-IncipitComposePs {
+    param([AllowEmptyString()] [object]$InputObject)
+
+    $text = (($InputObject | Out-String).Trim())
+    if (-not $text) {
+        return @()
+    }
+
+    try {
+        $parsed = $text | ConvertFrom-Json -ErrorAction Stop
+        return @($parsed)
+    }
+    catch {
+        $records = @()
+        foreach ($line in ($text -split "`r?`n")) {
+            $candidate = $line.Trim()
+            if ($candidate.StartsWith('{') -or $candidate.StartsWith('[')) {
+                try {
+                    $records += @($candidate | ConvertFrom-Json -ErrorAction Stop)
+                }
+                catch {
+                    # Keep looking: native Docker warnings can be mixed into output.
+                }
+            }
+        }
+        if ($records.Count -eq 0) {
+            throw "Compose ps did not return parseable JSON: $text"
+        }
+        return @($records)
+    }
+}
+
+function Get-IncipitComposeRecords {
+    param([string[]]$ProfileArguments = @())
+
+    $arguments = @('compose') + @($ProfileArguments) + @('ps', '--format', 'json')
+    $output = Invoke-IncipitDocker -Arguments $arguments
+    return @(ConvertFrom-IncipitComposePs -InputObject $output)
+}
+
+function Test-IncipitContainerRecordReady {
+    param([Parameter(Mandatory)] [object]$Record)
+
+    if ([string]$Record.State -ne 'running') {
+        return $false
+    }
+    $healthProperty = $Record.PSObject.Properties['Health']
+    if ($null -eq $healthProperty -or [string]::IsNullOrWhiteSpace([string]$Record.Health)) {
+        return $true
+    }
+    return [string]$Record.Health -eq 'healthy'
+}
+
+function Show-IncipitWaitDiagnostics {
+    param(
+        [string[]]$FailedServices,
+        [string[]]$ProfileArguments = @()
+    )
+
+    try {
+        $arguments = @('compose') + @($ProfileArguments) + @('ps')
+        $snapshot = (Invoke-IncipitDocker -Arguments $arguments | Out-String).TrimEnd()
+        if ($snapshot) {
+            Write-Host $snapshot
+        }
+    }
+    catch {
+        Write-Host "Unable to collect Compose state: $($_.Exception.Message)"
+    }
+
+    foreach ($service in $FailedServices) {
+        try {
+            $arguments = @('compose') + @($ProfileArguments) + @('logs', '--tail', '100', $service)
+            $logs = (Invoke-IncipitDocker -Arguments $arguments | Out-String).TrimEnd()
+            if ($logs) {
+                Write-Host $logs
+            }
+        }
+        catch {
+            Write-Host "Unable to collect logs for ${service}: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Wait-IncipitServices {
+    param(
+        [Parameter(Mandatory)] [string[]]$Services,
+        [string[]]$ProfileArguments = @(),
+        [int]$TimeoutSeconds = 180,
+        [switch]$Optional
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $failedServices = @($Services)
+    do {
+        try {
+            $records = @(Get-IncipitComposeRecords -ProfileArguments $ProfileArguments)
+            $failedServices = @($Services | Where-Object {
+                $service = $_
+                $record = $records | Where-Object { $_.Service -eq $service } | Select-Object -First 1
+                $null -eq $record -or -not (Test-IncipitContainerRecordReady -Record $record)
+            })
+        }
+        catch {
+            $failedServices = @($Services)
+        }
+
+        if ($failedServices.Count -eq 0) {
+            return @()
+        }
+        if ((Get-Date) -ge $deadline) {
+            break
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    Show-IncipitWaitDiagnostics -FailedServices $failedServices -ProfileArguments $ProfileArguments
+    if ($Optional) {
+        return @($failedServices | ForEach-Object {
+            New-IncipitCheck "container:$_" $false 'WARN' "optional service did not become healthy within $TimeoutSeconds seconds"
+        })
+    }
+
+    throw "Timed out waiting for required services: $($failedServices -join ', ')"
+}
+
+function Wait-IncipitInfrastructure {
+    param(
+        [switch]$Full,
+        [string[]]$ProfileArguments = @(Get-IncipitProfileArguments -Full:$Full),
+        [int]$TimeoutSeconds = 180
+    )
+
+    $null = Wait-IncipitServices `
+        -Services $script:CoreInfrastructureServices `
+        -ProfileArguments $ProfileArguments `
+        -TimeoutSeconds $TimeoutSeconds
+
+    if ($Full) {
+        return @(Wait-IncipitServices `
+            -Services $script:OptionalServices `
+            -ProfileArguments $ProfileArguments `
+            -TimeoutSeconds $TimeoutSeconds `
+            -Optional)
+    }
+    return @()
+}
+
+function Build-IncipitImages {
+    param([string[]]$ProfileArguments = @())
+
+    $arguments = @('compose') + @($ProfileArguments) + @('build', 'api', 'web')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+}
+
+function Start-IncipitInfrastructure {
+    param(
+        [switch]$Full,
+        [string[]]$ProfileArguments = @()
+    )
+
+    $arguments = @('compose') + @($ProfileArguments) + @('up', '-d') + $script:CoreInfrastructureServices
+    $null = Invoke-IncipitDocker -Arguments $arguments
+
+    if ($Full) {
+        $arguments = @('compose') + @($ProfileArguments) + @('up', '-d') + $script:OptionalServices
+        $null = Invoke-IncipitDocker -Arguments $arguments
+    }
+}
+
+function Invoke-IncipitMigration {
+    param([string[]]$ProfileArguments = @())
+
+    $arguments = @('compose') + @($ProfileArguments) + @('run', '--rm', 'migrate')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+}
+
+function Wait-IncipitWorker {
+    param(
+        [string[]]$ProfileArguments = @(),
+        [int]$TimeoutSeconds = 180
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastDetail = 'no workflow poller'
+    do {
+        try {
+            $arguments = @('compose') + @($ProfileArguments) + @(
+                'exec', '-T', 'api', 'python', 'scripts/runtime/runtime_probe.py', 'worker', '--json'
+            )
+            $output = (Invoke-IncipitDocker -Arguments $arguments | Out-String).Trim()
+            $probe = $output | ConvertFrom-Json -ErrorAction Stop
+            if ($probe.ok) {
+                return $probe
+            }
+            $lastDetail = [string]$probe.detail
+        }
+        catch {
+            $lastDetail = $_.Exception.Message
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            break
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    Show-IncipitWaitDiagnostics -FailedServices @('worker') -ProfileArguments $ProfileArguments
+    throw "Timed out waiting for Temporal worker after $TimeoutSeconds seconds: $lastDetail"
+}
+
+function Start-IncipitApplications {
+    param(
+        [string[]]$ProfileArguments = @(),
+        [string]$RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+    )
+
+    $apiPort = Get-IncipitConfiguredValue -Name 'API_HOST_PORT' -Default '8000' -RootPath $RootPath
+    $webPort = Get-IncipitConfiguredValue -Name 'WEB_HOST_PORT' -Default '3300' -RootPath $RootPath
+
+    $arguments = @('compose') + @($ProfileArguments) + @('up', '-d', 'api')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+    $null = Wait-IncipitHttp -Uri "http://127.0.0.1:$apiPort/ready" -AcceptedStatus @(200)
+
+    $arguments = @('compose') + @($ProfileArguments) + @('up', '-d', 'worker')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+    $null = Wait-IncipitWorker -ProfileArguments $ProfileArguments
+
+    $arguments = @('compose') + @($ProfileArguments) + @('up', '-d', 'web')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+    $null = Wait-IncipitHttp -Uri "http://127.0.0.1:$webPort/"
+}
+
+function Start-Incipit {
+    [CmdletBinding()]
+    param([switch]$Full)
+
+    $doctor = @(Invoke-IncipitDoctor -Full:$Full)
+    if ($doctor | Where-Object { $_.Required -and $_.State -eq 'FAIL' }) {
+        throw 'Doctor found required failures. Fix them before startup.'
+    }
+
+    $profileArguments = @(Get-IncipitProfileArguments -Full:$Full)
+    $env:INCIPIT_OPTIONAL_SERVICES = Get-IncipitOptionalServices -Full:$Full
+
+    Build-IncipitImages -ProfileArguments $profileArguments
+    Start-IncipitInfrastructure -Full:$Full -ProfileArguments $profileArguments
+    $startupWarnings = @(Wait-IncipitInfrastructure -Full:$Full -ProfileArguments $profileArguments)
+    Invoke-IncipitMigration -ProfileArguments $profileArguments
+    Start-IncipitApplications -ProfileArguments $profileArguments
+    Get-IncipitStatus -AdditionalChecks $startupWarnings
+}
+
+function Stop-Incipit {
+    $arguments = @('compose', 'down', '--remove-orphans')
+    $null = Invoke-IncipitDocker -Arguments $arguments
+}
+
+function Add-IncipitHttpStatusCheck {
+    param(
+        [Parameter(Mandatory)] [System.Collections.Generic.List[object]]$Checks,
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [string]$Uri,
+        [bool]$Required = $true
+    )
+
+    try {
+        $response = Invoke-IncipitHttpRequest -Uri $Uri -TimeoutSeconds 5
+        if ([int]$response.StatusCode -eq 200) {
+            $Checks.Add((New-IncipitCheck $Name $Required 'PASS' 'HTTP 200'))
+        }
+        else {
+            $state = if ($Required) { 'FAIL' } else { 'WARN' }
+            $Checks.Add((New-IncipitCheck $Name $Required $state "HTTP $($response.StatusCode)"))
+        }
+        return $response
+    }
+    catch {
+        $state = if ($Required) { 'FAIL' } else { 'WARN' }
+        $Checks.Add((New-IncipitCheck $Name $Required $state $_.Exception.Message))
+        return $null
+    }
+}
+
+function Get-IncipitStatus {
+    [CmdletBinding()]
+    param(
+        [switch]$Json,
+        [string]$RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path,
+        [object[]]$AdditionalChecks = @()
+    )
+
+    $records = @()
+    $composeError = $null
+    try {
+        $records = @(Get-IncipitComposeRecords)
+    }
+    catch {
+        $composeError = $_.Exception.Message
+    }
+
+    if ($null -ne $composeError) {
+        $failedCheck = New-IncipitCheck 'compose-state' $true 'FAIL' $composeError
+        $failedResult = [ordered]@{
+            status = 'UNHEALTHY'
+            checks = @([ordered]@{
+                name = $failedCheck.Name
+                required = $failedCheck.Required
+                state = $failedCheck.State
+                detail = $failedCheck.Detail
+            })
+        }
+        if ($Json) {
+            return ($failedResult | ConvertTo-Json -Depth 5)
+        }
+        Write-Host 'INCIPIT: UNHEALTHY'
+        Write-Host (($failedCheck | Format-Table Name, Required, State, Detail -AutoSize | Out-String).TrimEnd())
+        return
+    }
+
+    if ($records.Count -eq 0) {
+        $emptyResult = [ordered]@{ status = 'STOPPED'; checks = @() }
+        if ($Json) {
+            return ($emptyResult | ConvertTo-Json -Depth 5)
+        }
+        Write-Host 'INCIPIT: STOPPED'
+        return
+    }
+
+    $checks = [System.Collections.Generic.List[object]]::new()
+    foreach ($additionalCheck in $AdditionalChecks) {
+        $checks.Add($additionalCheck)
+    }
+    $requiredServices = $script:CoreInfrastructureServices + $script:ApplicationServices
+    foreach ($service in $requiredServices) {
+        $record = $records | Where-Object { $_.Service -eq $service } | Select-Object -First 1
+        if ($null -eq $record) {
+            $checks.Add((New-IncipitCheck "container:$service" $true 'FAIL' 'container is missing'))
+        }
+        elseif (Test-IncipitContainerRecordReady -Record $record) {
+            $detail = if ($record.PSObject.Properties['Health'] -and $record.Health) { $record.Health } else { $record.State }
+            $checks.Add((New-IncipitCheck "container:$service" $true 'PASS' ([string]$detail)))
+        }
+        else {
+            $detail = "state=$($record.State)"
+            if ($record.PSObject.Properties['Health'] -and $record.Health) { $detail += ", health=$($record.Health)" }
+            $checks.Add((New-IncipitCheck "container:$service" $true 'FAIL' $detail))
+        }
+    }
+
+    foreach ($record in ($records | Where-Object { $_.Service -in $script:OptionalServices })) {
+        if (Test-IncipitContainerRecordReady -Record $record) {
+            $checks.Add((New-IncipitCheck "container:$($record.Service)" $false 'PASS' ([string]$record.State)))
+        }
+        else {
+            $health = if ($record.PSObject.Properties['Health']) { [string]$record.Health } else { 'none' }
+            $checks.Add((New-IncipitCheck "container:$($record.Service)" $false 'WARN' "state=$($record.State), health=$health"))
+        }
+    }
+
+    $apiPort = Get-IncipitConfiguredValue -Name 'API_HOST_PORT' -Default '8000' -RootPath $RootPath
+    $webPort = Get-IncipitConfiguredValue -Name 'WEB_HOST_PORT' -Default '3300' -RootPath $RootPath
+    $null = Add-IncipitHttpStatusCheck -Checks $checks -Name 'api' -Uri "http://127.0.0.1:$apiPort/health"
+    $readyResponse = Add-IncipitHttpStatusCheck -Checks $checks -Name 'api-ready' -Uri "http://127.0.0.1:$apiPort/ready"
+    if ($null -ne $readyResponse -and $readyResponse.Content) {
+        try {
+            $readyPayload = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+            foreach ($item in @($readyPayload.checks)) {
+                $itemRequired = [bool]$item.required
+                if ([string]$item.status -eq 'ok') {
+                    $checks.Add((New-IncipitCheck ([string]$item.name) $itemRequired 'PASS' ([string]$item.detail)))
+                }
+                else {
+                    $state = if ($itemRequired) { 'FAIL' } else { 'WARN' }
+                    $checks.Add((New-IncipitCheck ([string]$item.name) $itemRequired $state ([string]$item.detail)))
+                }
+            }
+        }
+        catch {
+            $checks.Add((New-IncipitCheck 'api-ready-payload' $true 'FAIL' $_.Exception.Message))
+        }
+    }
+
+    try {
+        $arguments = @('compose', 'exec', '-T', 'api', 'python', 'scripts/runtime/runtime_probe.py', 'worker', '--json')
+        $workerOutput = (Invoke-IncipitDocker -Arguments $arguments | Out-String).Trim()
+        $workerProbe = $workerOutput | ConvertFrom-Json -ErrorAction Stop
+        if ($workerProbe.ok) {
+            $checks.Add((New-IncipitCheck 'worker-poller' $true 'PASS' ([string]$workerProbe.detail)))
+        }
+        else {
+            $checks.Add((New-IncipitCheck 'worker-poller' $true 'FAIL' ([string]$workerProbe.detail)))
+        }
+    }
+    catch {
+        $checks.Add((New-IncipitCheck 'worker-poller' $true 'FAIL' $_.Exception.Message))
+    }
+
+    $null = Add-IncipitHttpStatusCheck -Checks $checks -Name 'web' -Uri "http://127.0.0.1:$webPort/"
+    $resultChecks = $checks.ToArray()
+    $overall = Get-IncipitOverallState -Checks $resultChecks
+    $serializableChecks = @($resultChecks | ForEach-Object {
+        [ordered]@{
+            name = $_.Name
+            required = $_.Required
+            state = $_.State
+            detail = $_.Detail
+        }
+    })
+    $result = [ordered]@{ status = $overall; checks = $serializableChecks }
+
+    if ($Json) {
+        return ($result | ConvertTo-Json -Depth 5)
+    }
+    Write-Host "INCIPIT: $overall"
+    Write-Host (($resultChecks | Format-Table Name, Required, State, Detail -AutoSize | Out-String).TrimEnd())
+}
+
+function Show-IncipitLogs {
+    [CmdletBinding()]
+    param(
+        [string]$Service,
+        [switch]$Follow
+    )
+
+    if ($Service) {
+        $arguments = @('compose', 'logs', '--tail', '200')
+        if ($Follow) {
+            $arguments += '--follow'
+        }
+        $arguments += $Service
+        Invoke-IncipitDocker -Arguments $arguments
+        return
+    }
+
+    $services = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in @('api', 'worker', 'web', 'temporal')) {
+        $services.Add($name)
+    }
+    try {
+        foreach ($record in @(Get-IncipitComposeRecords)) {
+            if (-not (Test-IncipitContainerRecordReady -Record $record) -and -not $services.Contains([string]$record.Service)) {
+                $services.Add([string]$record.Service)
+            }
+        }
+    }
+    catch {
+        # Base service logs are still useful when Compose state cannot be parsed.
+    }
+
+    $arguments = @('compose', 'logs', '--tail', '100') + $services.ToArray()
+    if ($Follow) {
+        $arguments = @('compose', 'logs', '--tail', '100', '--follow') + $services.ToArray()
+    }
+    Invoke-IncipitDocker -Arguments $arguments
+}
+
 Export-ModuleMember -Function @(
     'Invoke-IncipitDocker',
     'Test-IncipitCommand',
     'Test-IncipitPort',
     'Invoke-IncipitDoctor',
-    'Get-IncipitOverallState'
+    'Get-IncipitOverallState',
+    'Get-IncipitProfileArguments',
+    'Get-IncipitOptionalServices',
+    'Invoke-IncipitHttpRequest',
+    'Wait-IncipitHttp',
+    'ConvertFrom-IncipitComposePs',
+    'Get-IncipitComposeRecords',
+    'Wait-IncipitServices',
+    'Wait-IncipitInfrastructure',
+    'Build-IncipitImages',
+    'Start-IncipitInfrastructure',
+    'Invoke-IncipitMigration',
+    'Wait-IncipitWorker',
+    'Start-IncipitApplications',
+    'Start-Incipit',
+    'Stop-Incipit',
+    'Get-IncipitStatus',
+    'Show-IncipitLogs'
 )
