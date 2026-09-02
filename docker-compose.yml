@@ -1,43 +1,84 @@
-version: "3.9"
+x-app-environment: &app-environment
+  APP_ENV: local
+  POSTGRES_URL: postgresql+asyncpg://arc:arc@postgres:5432/arc_knowledge
+  REDIS_URL: redis://redis:6379/0
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+  MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+  MINIO_BUCKET: arc-documents
+  MINIO_SECURE: "false"
+  JWT_SECRET_KEY: &jwt-secret "${JWT_SECRET_KEY:-change-this-for-any-shared-environment}"
+  JWT_SECRET: *jwt-secret
+  MILVUS_HOST: milvus
+  MILVUS_PORT: "19530"
+  ES_URL: http://elasticsearch:9200
+  TEMPORAL_HOST: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE: arc-ingestion
+  INFINITY_BASE_URL: http://infinity:7997
+  OCR_SERVICE_URL: http://paddleocr:7998
+  MINERU_SERVICE_URL: http://mineru:7999
+  OTEL_ENABLED: "${OTEL_ENABLED:-false}"
+  OTEL_EXPORTER_OTLP_ENDPOINT: &otlp-endpoint http://phoenix:4317
+  OTLP_ENDPOINT: *otlp-endpoint
+  RUNTIME_OPTIONAL_SERVICES: "${INCIPIT_OPTIONAL_SERVICES:-}"
+  RUNTIME_PROBE_TIMEOUT_SECONDS: "${RUNTIME_PROBE_TIMEOUT_SECONDS:-3}"
+  LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+  LLM_BASE_URL: &llm-base-url "${LLM_BASE_URL:-http://host.docker.internal:11434/v1}"
+  OPENAI_BASE_URL: *llm-base-url
+  LLM_MODEL: &llm-model "${LLM_MODEL:-qwen2.5:7b}"
+  OPENAI_LLM_MODEL: *llm-model
+  LLM_API_KEY: &llm-api-key "${LLM_API_KEY:-ollama}"
+  OPENAI_API_KEY: *llm-api-key
+  EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-ollama}"
+  EMBEDDING_BASE_URL: &embedding-base-url "${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}"
+  OPENAI_EMBEDDING_BASE_URL: *embedding-base-url
+  EMBEDDING_MODEL: &embedding-model "${EMBEDDING_MODEL:-nomic-embed-text}"
+  OPENAI_EMBEDDING_MODEL: *embedding-model
+  EMBEDDING_API_KEY: &embedding-api-key "${EMBEDDING_API_KEY:-ollama}"
+  OPENAI_EMBEDDING_API_KEY: *embedding-api-key
+  EMBEDDING_DIMENSIONS: &embedding-dimensions "${EMBEDDING_DIMENSIONS:-768}"
+  OPENAI_EMBEDDING_DIMENSIONS: *embedding-dimensions
+  SMOKE_TENANT_ID: "${SMOKE_TENANT_ID:-r0-smoke}"
+  SMOKE_EMAIL: "${SMOKE_EMAIL:-r0-smoke@local.invalid}"
+  SMOKE_PASSWORD: "${SMOKE_PASSWORD:-R0-local-smoke-only-2026}"
 
 services:
-
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.3-alpine
     environment:
       POSTGRES_USER: arc
       POSTGRES_PASSWORD: arc
       POSTGRES_DB: arc_knowledge
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U arc"]
+      test: ["CMD-SHELL", "pg_isready -U arc -d arc_knowledge"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
 
-  # ── MinIO ───────────────────────────────────────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-07-16T23-46-41Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_SECRET_KEY:-minioadmin}"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 12
 
-  # ── Milvus（单机版）─────────────────────────────────────────────────────────
   etcd:
     image: quay.io/coreos/etcd:v3.5.14
     environment:
@@ -52,11 +93,12 @@ services:
       --data-dir=/etcd
     volumes:
       - etcd_data:/etcd
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   milvus:
     image: milvusdb/milvus:v2.4.9
@@ -64,13 +106,13 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-      MINIO_ACCESS_KEY_ID: minioadmin
-      MINIO_SECRET_ACCESS_KEY: minioadmin
+      MINIO_ACCESS_KEY_ID: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_ACCESS_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
     ports:
-      - "19530:19530"  # gRPC
-      - "9091:9091"    # HTTP metrics
+      - "127.0.0.1:${MILVUS_HOST_PORT:-19530}:19530"
     volumes:
       - milvus_data:/var/lib/milvus
+    restart: unless-stopped
     depends_on:
       etcd:
         condition: service_healthy
@@ -78,71 +120,154 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
-  # ── Elasticsearch ───────────────────────────────────────────────────────────
   elasticsearch:
-    image: elasticsearch:8.13.4
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
-  # ── Redis Stack（含向量搜索模块，用于语义缓存）──────────────────────────────
   redis:
-    image: redis/redis-stack-server:latest
+    image: redis/redis-stack-server:7.4.0-v5
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
 
-  # ── Temporal ────────────────────────────────────────────────────────────────
   temporal:
-    image: temporalio/auto-setup:1.24
+    image: temporalio/auto-setup:1.24.2
     environment:
       DB: postgres12
-      DB_PORT: 5432
+      DB_PORT: "5432"
       POSTGRES_USER: arc
       POSTGRES_PWD: arc
       POSTGRES_SEEDS: postgres
     ports:
-      - "7500:7233"
+      - "127.0.0.1:${TEMPORAL_HOST_PORT:-7233}:7233"
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "127.0.0.1:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
 
   temporal-ui:
     image: temporalio/ui:2.26.2
     environment:
       TEMPORAL_ADDRESS: temporal:7233
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${TEMPORAL_UI_HOST_PORT:-8233}:8080"
+    restart: unless-stopped
     depends_on:
-      - temporal
+      temporal:
+        condition: service_healthy
 
-  # ── Infinity 推理服务（BGE Reranker）────────────────────────────────────────
-  infinity:
-    image: michaelf34/infinity:latest
+  migrate:
+    image: incipit-api:r0
+    build:
+      context: .
+    command: ["python", "scripts/runtime/bootstrap.py"]
+    environment: *app-environment
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  api:
+    image: incipit-api:r0
+    build:
+      context: .
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-environment
     ports:
-      - "7997:7997"
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  worker:
+    image: incipit-api:r0
+    command: ["python", "scripts/start_worker.py"]
+    environment: *app-environment
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+
+  web:
+    image: incipit-web:r0
+    build:
+      context: ../arc-knowledge-web
+      args:
+        VITE_API_BASE_URL: /api
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-3300}:80"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  infinity:
+    image: michaelf34/infinity:0.0.77-cpu
+    profiles: ["rerank"]
+    environment:
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-1}"
+    ports:
+      - "127.0.0.1:${INFINITY_HOST_PORT:-7997}:7997"
     volumes:
-      - ./models:/models
+      - ./models:/models:ro
     command: >
       v2
       --model-id /models/bge-reranker-v2-m3
@@ -153,43 +278,17 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:7997/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # ── Prometheus ───────────────────────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.52.0
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --web.enable-lifecycle
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-
-  # ── Grafana ──────────────────────────────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:10.4.2
-    ports:
-      - "3301:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      - prometheus
-
-  # ── OCR 服务（PaddleOCR）────────────────────────────────────────────────────
-  # 仅在无内部 MinerU 服务时使用，需要时手动启动：docker compose --profile ocr up -d
   paddleocr:
     profiles: ["ocr"]
     build:
       context: ./docker/paddleocr
+    environment:
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-1}"
     ports:
-      - "7998:7998"
+      - "127.0.0.1:${PADDLEOCR_HOST_PORT:-7998}:7998"
     volumes:
       - paddleocr_models:/root/.paddleocr
     restart: unless-stopped
@@ -199,14 +298,15 @@ services:
       timeout: 10s
       retries: 5
 
-  # ── 文档解析服务（MinerU）────────────────────────────────────────────────────
-  # 仅在无内部 MinerU 服务时使用，需要时手动启动：docker compose --profile ocr up -d
   mineru:
     profiles: ["ocr"]
     build:
       context: ./docker/mineru
+    environment:
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-1}"
     ports:
-      - "7999:7999"
+      - "127.0.0.1:${MINERU_HOST_PORT:-7999}:7999"
     volumes:
       - mineru_models:/root/.cache/huggingface
     restart: unless-stopped
@@ -216,24 +316,49 @@ services:
       timeout: 10s
       retries: 5
 
-  # ── Trace 后端（Phoenix）─────────────────────────────────────────────────────
-  # 接收 OTLP span（应用 settings.otlp_endpoint 默认指向 4317），UI 看瀑布图。
-  # 版本锁死，禁用 latest（防 API 漂移，理由同 RAGAS）。
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    profiles: ["observe"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    profiles: ["observe"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3301}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
   phoenix:
     image: arizephoenix/phoenix:version-18.0.0
+    profiles: ["observe"]
     ports:
-      - "6006:6006"    # UI + OTLP/HTTP
-      - "4317:4317"    # OTLP/gRPC
+      - "127.0.0.1:${PHOENIX_HOST_PORT:-6006}:6006"
+      - "127.0.0.1:${PHOENIX_OTLP_HOST_PORT:-4317}:4317"
     volumes:
-      - phoenix_data:/mnt/data    # SQLite 落盘，重启不丢 trace
+      - phoenix_data:/mnt/data
     restart: unless-stopped
     healthcheck:
-      # 镜像是 Python 应用,不赌 curl/wget 存在,用自带解释器探活
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006', timeout=3)"]
       interval: 30s
       timeout: 10s
       retries: 5
-
 
 volumes:
   postgres_data:
