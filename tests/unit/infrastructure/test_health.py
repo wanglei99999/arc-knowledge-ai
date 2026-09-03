@@ -5,6 +5,7 @@ import pytest
 
 from app.infrastructure.health import (
     build_readiness_service,
+    check_elasticsearch,
     check_http_endpoint,
     check_postgres,
     check_redis,
@@ -79,6 +80,40 @@ async def test_redis_probe_requires_ping_true(monkeypatch):
 
     with pytest.raises(ConnectionError, match="PING"):
         await check_redis()
+
+
+@pytest.mark.asyncio
+async def test_elasticsearch_probe_runs_the_sync_client_off_the_event_loop(monkeypatch):
+    calls: list[tuple[str, str | None]] = []
+
+    class IndicesStub:
+        def exists(self, *, index):
+            calls.append(("exists", index))
+            return True
+
+        def stats(self, *, index):
+            calls.append(("stats", index))
+            return {}
+
+    class ElasticsearchStub:
+        indices = IndicesStub()
+
+        def ping(self):
+            calls.append(("ping", None))
+            return True
+
+    monkeypatch.setattr(
+        "app.infrastructure.health.get_es_client",
+        lambda: ElasticsearchStub(),
+    )
+
+    await check_elasticsearch()
+
+    assert calls == [
+        ("ping", None),
+        ("exists", "arc_chunks"),
+        ("stats", "arc_chunks"),
+    ]
 
 
 def test_optional_service_parser_normalizes_case_and_whitespace(monkeypatch):

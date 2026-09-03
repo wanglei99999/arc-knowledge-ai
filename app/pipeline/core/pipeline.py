@@ -52,19 +52,19 @@ class Pipeline(Generic[TInput, TOutput]):
     # ── Builder API ─────────────────────────────────────────────────────────
 
     @classmethod
-    def start(cls, stage: BaseStage) -> "Pipeline":
+    def start(cls, stage: BaseStage) -> Pipeline:
         """链式构造入口：Pipeline.start(stage).then(...)"""
         return cls(stages=[stage])
 
-    def then(self, stage: BaseStage) -> "Pipeline":
+    def then(self, stage: BaseStage) -> Pipeline:
         """追加一个 Stage，返回新 Pipeline"""
         return Pipeline(stages=[*self.stages, stage], hooks=self._hook_runner.hooks)
 
-    def with_hooks(self, hooks: list[BaseHook]) -> "Pipeline":
+    def with_hooks(self, hooks: list[BaseHook]) -> Pipeline:
         """附加 Hook 列表，返回新 Pipeline"""
         return Pipeline(stages=self.stages, hooks=hooks)
 
-    def as_stage(self, name: str) -> "_PipelineStage":
+    def as_stage(self, name: str) -> _PipelineStage:
         """把整条 Pipeline 包装成一个 Stage，用于 SubPipeline 组合"""
         return _PipelineStage(name=name, pipeline=self)
 

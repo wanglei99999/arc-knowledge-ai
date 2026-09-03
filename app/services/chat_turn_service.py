@@ -23,23 +23,25 @@ from app.services.chat_service import AttachmentAnswerRequest, ChatService
 from app.services.document_service import DocumentService, IngestRequest, IngestResult
 
 MAX_ATTACHMENTS = 5
-ALLOWED_MIME_TYPES = frozenset({
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "text/plain",
-    "text/html",
-    "text/markdown",
-    "image/jpeg",
-    "image/png",
-    "image/tiff",
-    "image/bmp",
-    "image/webp",
-})
+ALLOWED_MIME_TYPES = frozenset(
+    {
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "text/html",
+        "text/markdown",
+        "image/jpeg",
+        "image/png",
+        "image/tiff",
+        "image/bmp",
+        "image/webp",
+    }
+)
 
 
 class ChatTurnError(Exception):
@@ -127,9 +129,7 @@ class ChatTurnService:
         except ValueError as exc:
             raise ChatTurnNotFoundError("会话不存在") from exc
 
-    async def get_turn(
-        self, *, turn_id: str, tenant_id: str, user_id: str
-    ) -> ChatTurnView:
+    async def get_turn(self, *, turn_id: str, tenant_id: str, user_id: str) -> ChatTurnView:
         turn = await self._turn_repo.get_turn(
             turn_id=turn_id,
             tenant_id=tenant_id,
@@ -139,9 +139,7 @@ class ChatTurnService:
             raise ChatTurnNotFoundError("聊天轮次不存在")
         return turn
 
-    async def prepare_answer(
-        self, *, turn_id: str, tenant_id: str, user_id: str
-    ) -> AnswerClaim:
+    async def prepare_answer(self, *, turn_id: str, tenant_id: str, user_id: str) -> AnswerClaim:
         """在返回 SSE 响应前校验并原子抢占本轮回答权。"""
         turn = await self.get_turn(
             turn_id=turn_id,
@@ -174,9 +172,7 @@ class ChatTurnService:
             raise ChatTurnConflictError("聊天轮次状态已经变化，请刷新后重试")
         return claim
 
-    async def stream_answer(
-        self, claim: AnswerClaim
-    ) -> AsyncIterator[str | list]:
+    async def stream_answer(self, claim: AnswerClaim) -> AsyncIterator[str | list]:
         """执行已抢占 Turn 的附件限定回答，并维护失败状态。"""
         request = AttachmentAnswerRequest(
             turn_id=claim.turn_id,
@@ -252,14 +248,10 @@ class ChatTurnService:
                 user_id=user_id,
             )
             if not linked:
-                current = await self.get_turn(
-                    turn_id=turn_id, tenant_id=tenant_id, user_id=user_id
-                )
+                current = await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
                 current_attachment = self._find_attachment(current, attachment_id)
                 if current_attachment.document_id:
-                    return AttachmentUploadResult(
-                        current_attachment.document_id, None, None
-                    )
+                    return AttachmentUploadResult(current_attachment.document_id, None, None)
                 raise ChatTurnConflictError("附件状态已经变化，请刷新后重试")
         except ChatTurnError:
             raise
@@ -273,14 +265,16 @@ class ChatTurnService:
             )
             raise ChatTurnConflictError("文件上传失败，请重试") from exc
 
-        result = await self._document_service.ingest(IngestRequest(
-            tenant_id=tenant_id,
-            space_id=turn.space_id,
-            file_path=object_key,
-            mime_type=mime_type,
-            original_filename=attachment.file_name,
-            document_id=document_id,
-        ))
+        result = await self._document_service.ingest(
+            IngestRequest(
+                tenant_id=tenant_id,
+                space_id=turn.space_id,
+                file_path=object_key,
+                mime_type=mime_type,
+                original_filename=attachment.file_name,
+                document_id=document_id,
+            )
+        )
         return AttachmentUploadResult(
             document_id=result.document_id,
             task_id=result.task_id,
@@ -297,14 +291,9 @@ class ChatTurnService:
     ) -> IngestResult:
         turn = await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
         attachment = self._find_attachment(turn, attachment_id)
-        if (
-            attachment.status is not AttachmentStatus.FAILED
-            or not attachment.document_id
-        ):
+        if attachment.status is not AttachmentStatus.FAILED or not attachment.document_id:
             raise ChatTurnConflictError("只有入库失败且已上传的附件可以直接重试")
-        return await self._document_service.retry_ingestion(
-            attachment.document_id, tenant_id
-        )
+        return await self._document_service.retry_ingestion(attachment.document_id, tenant_id)
 
     async def set_ignored(
         self,
@@ -361,9 +350,7 @@ class ChatTurnService:
             raise ChatTurnConflictError("附件未添加，轮次状态或附件数量已经变化")
         return await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
 
-    async def cancel_turn(
-        self, *, turn_id: str, tenant_id: str, user_id: str
-    ) -> ChatTurnView:
+    async def cancel_turn(self, *, turn_id: str, tenant_id: str, user_id: str) -> ChatTurnView:
         await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
         cancelled = await self._turn_repo.cancel_turn(
             turn_id=turn_id,
@@ -374,9 +361,7 @@ class ChatTurnService:
             raise ChatTurnConflictError("当前聊天轮次不能取消")
         return await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
 
-    def _validate_attachment_list(
-        self, attachments: list[AttachmentDeclaration]
-    ) -> None:
+    def _validate_attachment_list(self, attachments: list[AttachmentDeclaration]) -> None:
         if not attachments:
             raise ChatTurnValidationError("至少需要一个附件")
         if len(attachments) > MAX_ATTACHMENTS:

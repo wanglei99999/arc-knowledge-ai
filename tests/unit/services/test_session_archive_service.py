@@ -216,9 +216,7 @@ async def test_unpin_delegates_with_owned_scope() -> None:
 async def test_rename_delegates_with_owned_scope_and_title() -> None:
     service, session_repo, _, _ = _service()
 
-    result = await service.rename(
-        "session-1", "tenant-1", "user-1", "新的标题"
-    )
+    result = await service.rename("session-1", "tenant-1", "user-1", "新的标题")
 
     assert result is session_repo.rename_result
     assert session_repo.calls[-1] == (

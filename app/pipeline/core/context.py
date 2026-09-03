@@ -12,13 +12,14 @@ if TYPE_CHECKING:
 @dataclass
 class QuotaSnapshot:
     """租户配额快照（请求开始时固化，避免并发读写）"""
+
     max_documents: int
     max_storage_bytes: int
     max_api_calls_per_day: int
     used_documents: int
     used_storage_bytes: int
     used_api_calls_today: int
-    max_spend_per_day: float = 0.0    # 0 = 不限制
+    max_spend_per_day: float = 0.0  # 0 = 不限制
     used_spend_today: float = 0.0
 
     def has_api_quota(self) -> bool:
@@ -37,12 +38,14 @@ class QuotaSnapshot:
 @dataclass
 class TenantConfig:
     """租户级运行时配置（从 DB / Nacos 加载）"""
+
     tenant_id: str
     ingestion_strategy: str = "standard"
     retrieval_strategy: str = "hybrid"
     embedding_provider: str = "openai_embedding"
+    parser_provider: str = "unstructured_parser"
     llm_provider: str = "openai_llm"
-    default_llm_model: str = ""          # 空字符串 = 使用 Provider 自己的 settings 默认值
+    default_llm_model: str = ""  # 空字符串 = 使用 Provider 自己的 settings 默认值
     allowed_models: list[str] = field(default_factory=list)  # 空列表 = 不限制
     chunk_size: int = 400
     chunk_overlap: int = 50
@@ -62,6 +65,7 @@ class ProcessingContext:
     - metadata 是可扩展区，Stage 间通过 with_metadata() 传递中间结果
     - events 列表记录领域事件，Pipeline 结束后统一广播
     """
+
     tenant_id: str
     document_id: str
     task_id: str
@@ -69,7 +73,7 @@ class ProcessingContext:
     quota: QuotaSnapshot
     config: TenantConfig
     metadata: dict[str, Any] = field(default_factory=dict)
-    events: list["DomainEvent"] = field(default_factory=list)
+    events: list[DomainEvent] = field(default_factory=list)
 
     @classmethod
     def create(
@@ -80,7 +84,7 @@ class ProcessingContext:
         config: TenantConfig,
         task_id: str | None = None,
         trace_id: str | None = None,
-    ) -> "ProcessingContext":
+    ) -> ProcessingContext:
         return cls(
             tenant_id=tenant_id,
             document_id=document_id,
@@ -90,11 +94,11 @@ class ProcessingContext:
             config=config,
         )
 
-    def with_metadata(self, **kwargs: Any) -> "ProcessingContext":
+    def with_metadata(self, **kwargs: Any) -> ProcessingContext:
         """不可变更新：返回新 Context，原 Context 不变"""
         return dataclasses.replace(self, metadata={**self.metadata, **kwargs})
 
-    def emit(self, event: "DomainEvent") -> "ProcessingContext":
+    def emit(self, event: DomainEvent) -> ProcessingContext:
         """追加领域事件，返回新 Context"""
         return dataclasses.replace(self, events=[*self.events, event])
 

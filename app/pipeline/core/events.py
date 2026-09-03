@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Coroutine
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
 class DomainEvent:
     """领域事件基类"""
-    type: str   #事件类型
-    tenant_id: str  #租户id
-    document_id: str = ""  #文档id，非文档类事件（如 token 消耗）可为空
-    payload: dict[str, Any] = field(default_factory=dict)   #附加信息，比如耗时、错误原因、token数量
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4())) #事件ID
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc)) #事件发生时间
+
+    type: str  # 事件类型
+    tenant_id: str  # 租户id
+    document_id: str = ""  # 文档id，非文档类事件（如 token 消耗）可为空
+    payload: dict[str, Any] = field(default_factory=dict)  # 附加信息，比如耗时、错误原因、token数量
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))  # 事件ID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))  # 事件发生时间
 
 
 # 预定义事件类型常量
@@ -41,9 +43,11 @@ class EventBus:
 
     def subscribe(self, event_type: str) -> Callable[[Handler], Handler]:
         """装饰器：订阅某类事件"""
+
         def decorator(fn: Handler) -> Handler:
             self._handlers[event_type].append(fn)
             return fn
+
         return decorator
 
     async def publish(self, event: DomainEvent) -> None:

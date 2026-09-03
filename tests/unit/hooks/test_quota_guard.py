@@ -1,4 +1,5 @@
 """QuotaGuard 单元测试"""
+
 import pytest
 
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig

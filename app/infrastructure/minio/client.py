@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import boto3
 from botocore.exceptions import ClientError

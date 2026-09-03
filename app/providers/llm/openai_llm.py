@@ -40,13 +40,13 @@ class OpenAILLMProvider(LLMProvider):
 
     # model → context_window 映射（常见 OpenAI 模型）
     _CONTEXT_WINDOWS: dict[str, int] = {
-        "deepseek-v4-flash":   1_000_000,
-        "gpt-4o":              128_000,
-        "gpt-4o-mini":         128_000,
-        "gpt-4-turbo":         128_000,
-        "gpt-4":                 8_192,
-        "gpt-3.5-turbo":        16_385,
-        "gpt-3.5-turbo-16k":    16_385,
+        "deepseek-v4-flash": 1_000_000,
+        "gpt-4o": 128_000,
+        "gpt-4o-mini": 128_000,
+        "gpt-4-turbo": 128_000,
+        "gpt-4": 8_192,
+        "gpt-3.5-turbo": 16_385,
+        "gpt-3.5-turbo-16k": 16_385,
     }
 
     def get_context_window(self) -> int:
@@ -71,15 +71,17 @@ class OpenAILLMProvider(LLMProvider):
         output_tokens: int,
     ) -> None:
         try:
-            await event_bus.publish(DomainEvent(
-                type=EventType.TOKEN_CONSUMED,
-                tenant_id=ctx.tenant_id,
-                payload={
-                    "model": model,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                },
-            ))
+            await event_bus.publish(
+                DomainEvent(
+                    type=EventType.TOKEN_CONSUMED,
+                    tenant_id=ctx.tenant_id,
+                    payload={
+                        "model": model,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    },
+                )
+            )
         except Exception as e:
             logger.warning("Failed to publish TOKEN_CONSUMED event: %s", e)
 
@@ -97,7 +99,8 @@ class OpenAILLMProvider(LLMProvider):
         )
         if resp.usage:
             await self._publish_usage(
-                ctx, model,
+                ctx,
+                model,
                 resp.usage.prompt_tokens,
                 resp.usage.completion_tokens,
             )
@@ -123,7 +126,8 @@ class OpenAILLMProvider(LLMProvider):
             elif chunk.usage:
                 # 最后一个 chunk 携带 usage，不 yield
                 await self._publish_usage(
-                    ctx, model,
+                    ctx,
+                    model,
                     chunk.usage.prompt_tokens,
                     chunk.usage.completion_tokens,
                 )

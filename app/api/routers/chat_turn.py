@@ -33,11 +33,7 @@ async def _answer_sse_stream(event_iter: AsyncIterator) -> AsyncIterator[bytes]:
     """将附件回答 token、引用和安全错误包装为现有 SSE 协议。"""
     try:
         async for item in event_iter:
-            payload = (
-                {"citations": item}
-                if isinstance(item, list)
-                else {"delta": item}
-            )
+            payload = {"citations": item} if isinstance(item, list) else {"delta": item}
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
     except ChatTurnError as exc:
         payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
@@ -147,9 +143,7 @@ class IngestOut(BaseModel):
     workflow_run_id: str | None
 
     @classmethod
-    def from_result(
-        cls, result: AttachmentUploadResult | IngestResult
-    ) -> IngestOut:
+    def from_result(cls, result: AttachmentUploadResult | IngestResult) -> IngestOut:
         return cls(
             document_id=result.document_id,
             task_id=result.task_id,

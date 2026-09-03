@@ -850,7 +850,7 @@ x-app-environment: &app-environment
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
   EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-ollama}
   SMOKE_TENANT_ID: ${SMOKE_TENANT_ID:-r0-smoke}
-  SMOKE_EMAIL: ${SMOKE_EMAIL:-r0-smoke@local.invalid}
+  SMOKE_EMAIL: ${SMOKE_EMAIL:-r0-smoke@example.com}
   SMOKE_PASSWORD: ${SMOKE_PASSWORD:-R0-local-smoke-only-2026}
 ```
 
@@ -1026,7 +1026,7 @@ EMBEDDING_MODEL=nomic-embed-text
 EMBEDDING_API_KEY=ollama
 
 SMOKE_TENANT_ID=r0-smoke
-SMOKE_EMAIL=r0-smoke@local.invalid
+SMOKE_EMAIL=r0-smoke@example.com
 SMOKE_PASSWORD=R0-local-smoke-only-2026
 ```
 
@@ -1746,7 +1746,7 @@ def config_from_env(args) -> SmokeConfig:
         api_base_url=args.api_base_url,
         web_base_url=args.web_base_url,
         tenant_id=os.environ.get("SMOKE_TENANT_ID", "r0-smoke"),
-        email=os.environ.get("SMOKE_EMAIL", "r0-smoke@local.invalid"),
+        email=os.environ.get("SMOKE_EMAIL", "r0-smoke@example.com"),
         password=os.environ["SMOKE_PASSWORD"],
         timeout_seconds=args.timeout_seconds,
     )

@@ -6,6 +6,7 @@ MemoryManager — 三层记忆的统一读取入口。
 - 搜索语义记忆（Layer 3）
 - 保存用户消息
 """
+
 from __future__ import annotations
 
 import uuid
@@ -27,8 +28,12 @@ def _make_ctx(tenant_id: str) -> ProcessingContext:
         task_id=str(uuid.uuid4()),
         trace_id=str(uuid.uuid4()),
         quota=QuotaSnapshot(
-            max_documents=0, max_storage_bytes=0, max_api_calls_per_day=999999,
-            used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+            max_documents=0,
+            max_storage_bytes=0,
+            max_api_calls_per_day=999999,
+            used_documents=0,
+            used_storage_bytes=0,
+            used_api_calls_today=0,
         ),
         config=TenantConfig(tenant_id=tenant_id),
     )
@@ -37,7 +42,7 @@ def _make_ctx(tenant_id: str) -> ProcessingContext:
 class MemoryManager:
     def __init__(self) -> None:
         self._session_repo = SessionRepository()
-        self._memory_repo  = MemoryRepository()
+        self._memory_repo = MemoryRepository()
 
     async def load_working_memory(
         self, session_id: str, tenant_id: str, user_id: str
@@ -57,9 +62,7 @@ class MemoryManager:
 
         if session.message_count <= last_n + 2:
             # 消息总量在窗口内，全部加载
-            all_msgs = await self._session_repo.get_all_messages(
-                session_id, tenant_id, user_id
-            )
+            all_msgs = await self._session_repo.get_all_messages(session_id, tenant_id, user_id)
             return WorkingMemory(
                 anchor=[],
                 summary=None,

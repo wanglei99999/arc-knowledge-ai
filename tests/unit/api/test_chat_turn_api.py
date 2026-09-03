@@ -77,28 +77,28 @@ class _Service:
         return await self._result("add", kwargs, _turn())
 
     async def retry_attachment(self, **kwargs):
-        return await self._result(
-            "retry", kwargs, IngestResult("document-1", "task-2", "run-2")
-        )
+        return await self._result("retry", kwargs, IngestResult("document-1", "task-2", "run-2"))
 
     async def set_ignored(self, **kwargs):
         turn = replace(_turn(), readiness=TurnReadiness.EMPTY)
         return await self._result("ignore", kwargs, turn)
 
     async def cancel_turn(self, **kwargs):
-        turn = replace(
-            _turn(), processing_status=TurnProcessingStatus.CANCELLED
-        )
+        turn = replace(_turn(), processing_status=TurnProcessingStatus.CANCELLED)
         return await self._result("cancel", kwargs, turn)
 
     async def prepare_answer(self, **kwargs):
-        return await self._result("prepare_answer", kwargs, SimpleNamespace(
-            turn_id="turn-1",
-            session_id="session-1",
-            space_id="space-1",
-            query="总结附件",
-            document_ids=["document-1"],
-        ))
+        return await self._result(
+            "prepare_answer",
+            kwargs,
+            SimpleNamespace(
+                turn_id="turn-1",
+                session_id="session-1",
+                space_id="space-1",
+                query="总结附件",
+                document_ids=["document-1"],
+            ),
+        )
 
     async def stream_answer(self, claim):
         self.calls.append(("stream_answer", {"claim": claim}))
@@ -130,12 +130,15 @@ def _declaration() -> dict:
 def test_create_turn_returns_persisted_attachment_state(api) -> None:
     client, service = api
 
-    response = client.post("/chat/turns", json={
-        "client_request_id": "11111111-1111-4111-8111-111111111111",
-        "session_id": "session-1",
-        "query": "总结附件",
-        "attachments": [_declaration()],
-    })
+    response = client.post(
+        "/chat/turns",
+        json={
+            "client_request_id": "11111111-1111-4111-8111-111111111111",
+            "session_id": "session-1",
+            "query": "总结附件",
+            "attachments": [_declaration()],
+        },
+    )
 
     assert response.status_code == 201
     assert response.json()["turn_id"] == "turn-1"

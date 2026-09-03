@@ -22,6 +22,7 @@ class SmartParserProvider(ParserProvider):
 
     provider_id = "smart_parser"
     SPARSE_THRESHOLD = 100  # 字符数，低于此视为扫描件
+
     async def parse(self, ctx: ProcessingContext, file_path: str) -> ParsedDocument:
         # Phase 1: 原生文字提取
         primary = registry.get_provider("unstructured_parser")
@@ -45,10 +46,10 @@ class SmartParserProvider(ParserProvider):
             except Exception as e:
                 logger.warning("SmartParser: OCR fallback failed, keeping original result: %s", e)
         return result
-    
+
     def supports(self, mime_type: str) -> bool:
         return True  # 委托给内部 provider 判断
-    
+
     async def health_check(self) -> HealthStatus:
         primary = registry.get_provider("unstructured_parser")
         return await primary.health_check()

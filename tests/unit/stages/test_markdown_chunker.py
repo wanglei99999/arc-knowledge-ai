@@ -57,7 +57,7 @@ def test_parse_table_is_single_block() -> None:
 
 
 def test_parse_mixed_document_preserves_order() -> None:
-    text = "# 标题\n\n" "正文段落。\n\n" "```python\ncode_here()\n```\n\n" "结尾段落。"
+    text = "# 标题\n\n正文段落。\n\n```python\ncode_here()\n```\n\n结尾段落。"
     blocks = parse_blocks(text)
     kinds = [b.kind for b in blocks]
     assert kinds == ["heading", "paragraph", "code", "paragraph"]

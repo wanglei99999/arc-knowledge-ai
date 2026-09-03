@@ -10,6 +10,7 @@
     # 使用国内镜像站
     HF_ENDPOINT=https://hf-mirror.com python scripts/download_bge_model.py
 """
+
 from __future__ import annotations
 
 import os
@@ -44,5 +45,8 @@ try:
     print("[download] 现在可以正常启动应用，Reranker 将使用本地缓存。")
 except Exception as e:
     print(f"\n[error] 下载或验证失败: {e}")
-    print("[hint] 检查网络连接；国内网络可尝试: HF_ENDPOINT=https://hf-mirror.com python scripts/download_bge_model.py")
+    print(
+        "[hint] 检查网络连接；国内网络可尝试: "
+        "HF_ENDPOINT=https://hf-mirror.com python scripts/download_bge_model.py"
+    )
     sys.exit(1)

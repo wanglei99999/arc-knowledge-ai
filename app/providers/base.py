@@ -1,23 +1,24 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import AsyncIterator, ClassVar
+from typing import ClassVar
 
 from app.pipeline.core.context import ProcessingContext
 
 
 class HealthStatus(Enum):
-    HEALTHY   = "healthy"
-    DEGRADED  = "degraded"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
-
 
 
 @dataclass
 class ParsedDocument:
     """解析后的文档结构"""
+
     text: str
     title: str | None = None
     metadata: dict | None = None
@@ -26,24 +27,25 @@ class ParsedDocument:
 
 @dataclass
 class ChatMessage:
-    role: str   # "system" | "user" | "assistant"
+    role: str  # "system" | "user" | "assistant"
     content: str
 
 
 # ── 基类 ─────────────────────────────────────────────────────────────────────
 
+
 class BaseProvider(ABC):
     provider_id: ClassVar[str]
 
     @abstractmethod
-    async def health_check(self) -> HealthStatus:
-        ...
+    async def health_check(self) -> HealthStatus: ...
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(id={self.provider_id!r})"
 
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
+
 
 class EmbeddingProvider(BaseProvider):
     @abstractmethod
@@ -61,11 +63,11 @@ class EmbeddingProvider(BaseProvider):
         ...
 
     @abstractmethod
-    def get_model_name(self) -> str:
-        ...
+    def get_model_name(self) -> str: ...
 
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
+
 
 class LLMProvider(BaseProvider):
     @abstractmethod
@@ -95,6 +97,7 @@ class LLMProvider(BaseProvider):
 
 # ── Parser ────────────────────────────────────────────────────────────────────
 
+
 class ParserProvider(BaseProvider):
     @abstractmethod
     async def parse(
@@ -112,6 +115,7 @@ class ParserProvider(BaseProvider):
 
 
 # ── Rerank ────────────────────────────────────────────────────────────────────
+
 
 class RerankProvider(BaseProvider):
     @abstractmethod

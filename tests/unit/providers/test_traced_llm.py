@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -34,7 +34,9 @@ async def test_generate_records_llm_span(fake_ctx, span_exporter):
     assert a["openinference.span.kind"] == "LLM"
     assert a["llm.input_messages.0.message.role"] == "user"
     assert a["llm.output_messages.0.message.content"] == "四十二"
-    assert a["llm.token_count.total"] == a["llm.token_count.prompt"] + a["llm.token_count.completion"]
+    assert (
+        a["llm.token_count.total"] == a["llm.token_count.prompt"] + a["llm.token_count.completion"]
+    )
 
 
 async def test_stream_passthrough_lossless_and_ttft(fake_ctx, span_exporter):

@@ -76,6 +76,7 @@ async def dev_reset() -> dict:
 
 # ── 租户 LLM 配置管理 ─────────────────────────────────────────────────────────
 
+
 class TenantConfigBody(BaseModel):
     default_llm_provider: str = "openai_llm"
     default_llm_model: str = ""
@@ -116,6 +117,7 @@ async def update_tenant_config(tenant_id: str, body: TenantConfigBody) -> dict:
 
 # ── 模型单价配置 ───────────────────────────────────────────────────────────────
 
+
 class ModelConfigBody(BaseModel):
     input_cost_per_1k: float = 0.0
     output_cost_per_1k: float = 0.0
@@ -147,6 +149,7 @@ async def delete_model_config(model_id: str) -> dict:
 
 # ── 用量查询 ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/tenants/{tenant_id}/usage", summary="查询租户 LLM 用量")
 async def get_tenant_usage(
     tenant_id: str,
@@ -162,6 +165,7 @@ async def get_tenant_usage(
 
 # ── 系统聚合统计 ───────────────────────────────────────────────────────────────
 
+
 @router.get("/stats", summary="系统聚合统计")
 async def get_stats() -> dict:
     async with get_session() as session:
@@ -176,7 +180,7 @@ async def get_stats() -> dict:
     doc = doc_row.mappings().one()
     return {
         "document_count": int(doc["cnt"]),
-        "chunk_count":    int(chunk_row.scalar_one()),
-        "session_count":  int(session_row.scalar_one()),
-        "storage_bytes":  int(doc["storage"]),
+        "chunk_count": int(chunk_row.scalar_one()),
+        "session_count": int(session_row.scalar_one()),
+        "storage_bytes": int(doc["storage"]),
     }

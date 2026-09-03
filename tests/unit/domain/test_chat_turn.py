@@ -28,45 +28,55 @@ def _attachment(
 
 
 def test_readiness_is_ingesting_while_an_attachment_is_pending() -> None:
-    readiness = compute_readiness([
-        _attachment(AttachmentStatus.INDEXED),
-        _attachment(AttachmentStatus.PENDING_UPLOAD),
-    ])
+    readiness = compute_readiness(
+        [
+            _attachment(AttachmentStatus.INDEXED),
+            _attachment(AttachmentStatus.PENDING_UPLOAD),
+        ]
+    )
 
     assert readiness is TurnReadiness.INGESTING
 
 
 def test_readiness_is_blocked_for_an_active_failure() -> None:
-    readiness = compute_readiness([
-        _attachment(AttachmentStatus.FAILED),
-    ])
+    readiness = compute_readiness(
+        [
+            _attachment(AttachmentStatus.FAILED),
+        ]
+    )
 
     assert readiness is TurnReadiness.BLOCKED
 
 
 def test_readiness_prioritizes_failure_over_ingestion() -> None:
-    readiness = compute_readiness([
-        _attachment(AttachmentStatus.FAILED),
-        _attachment(AttachmentStatus.INGESTING),
-    ])
+    readiness = compute_readiness(
+        [
+            _attachment(AttachmentStatus.FAILED),
+            _attachment(AttachmentStatus.INGESTING),
+        ]
+    )
 
     assert readiness is TurnReadiness.BLOCKED
 
 
 def test_readiness_is_ready_when_every_active_attachment_is_indexed() -> None:
-    readiness = compute_readiness([
-        _attachment(AttachmentStatus.INDEXED),
-        _attachment(AttachmentStatus.FAILED, ignored=True),
-    ])
+    readiness = compute_readiness(
+        [
+            _attachment(AttachmentStatus.INDEXED),
+            _attachment(AttachmentStatus.FAILED, ignored=True),
+        ]
+    )
 
     assert readiness is TurnReadiness.READY
 
 
 def test_readiness_is_empty_when_every_attachment_is_ignored() -> None:
-    readiness = compute_readiness([
-        _attachment(AttachmentStatus.FAILED, ignored=True),
-        _attachment(AttachmentStatus.IGNORED),
-    ])
+    readiness = compute_readiness(
+        [
+            _attachment(AttachmentStatus.FAILED, ignored=True),
+            _attachment(AttachmentStatus.IGNORED),
+        ]
+    )
 
     assert readiness is TurnReadiness.EMPTY
 

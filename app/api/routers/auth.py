@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.dependencies import UserContext, require_user
-from app.services.auth_service import AuthService, TokenPair
+from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _service = AuthService()
@@ -12,7 +12,7 @@ _service = AuthService()
 
 class RegisterBody(BaseModel):
     email: EmailStr
-    password: str = Field(min_length = 8)
+    password: str = Field(min_length=8)
 
 
 class LoginBody(BaseModel):
@@ -76,4 +76,4 @@ async def logout(
     body: LogoutBody,
     ctx: UserContext = Depends(require_user),
 ) -> None:
-    await _service.logout(body.refresh_token,ctx.user_id)
+    await _service.logout(body.refresh_token, ctx.user_id)

@@ -26,13 +26,16 @@ class SessionRepository:
             VALUES (:session_id, :tenant_id, :user_id, :title, :space_id)
         """)
         async with get_db() as db:
-            await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id":  tenant_id,
-                "user_id":    user_id,
-                "title":      title,
-                "space_id":   space_id,
-            })
+            await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "title": title,
+                    "space_id": space_id,
+                },
+            )
         return Session(
             session_id=session_id,
             tenant_id=tenant_id,
@@ -41,9 +44,7 @@ class SessionRepository:
             title=title,
         )
 
-    async def get_by_id(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def get_by_id(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         sql = text("""
             SELECT session_id, tenant_id, user_id, space_id, title, summary,
                    message_count, archived_at, pinned_at, created_at, updated_at
@@ -53,9 +54,9 @@ class SessionRepository:
               AND user_id    = :user_id
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id, "user_id": user_id
-            })
+            result = await db.execute(
+                sql, {"session_id": session_id, "tenant_id": tenant_id, "user_id": user_id}
+            )
             row = result.one_or_none()
         return _row_to_session(row) if row else None
 
@@ -80,16 +81,20 @@ class SessionRepository:
             LIMIT :limit OFFSET :offset
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "tenant_id": tenant_id, "user_id": user_id,
-                "limit": limit, "offset": offset,"space_id":space_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "limit": limit,
+                    "offset": offset,
+                    "space_id": space_id,
+                },
+            )
             rows = result.fetchall()
         return [_row_to_session(r) for r in rows]
 
-    async def archive(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    async def archive(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         sql = text("""
             UPDATE sessions
             SET archived_at = COALESCE(archived_at, NOW()), pinned_at = NULL
@@ -98,16 +103,17 @@ class SessionRepository:
               AND user_id = :user_id
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             return result.rowcount > 0
 
-    async def restore(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    async def restore(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         sql = text("""
             UPDATE sessions
             SET archived_at = NULL
@@ -116,16 +122,17 @@ class SessionRepository:
               AND user_id = :user_id
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             return result.rowcount > 0
 
-    async def pin(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def pin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         sql = text("""
             UPDATE sessions
             SET pinned_at = COALESCE(pinned_at, NOW())
@@ -137,17 +144,18 @@ class SessionRepository:
                       message_count, archived_at, pinned_at, created_at, updated_at
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             row = result.one_or_none()
             return _row_to_session(row) if row else None
 
-    async def unpin(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def unpin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         sql = text("""
             UPDATE sessions
             SET pinned_at = NULL
@@ -159,11 +167,14 @@ class SessionRepository:
                       message_count, archived_at, pinned_at, created_at, updated_at
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             row = result.one_or_none()
             return _row_to_session(row) if row else None
 
@@ -185,12 +196,15 @@ class SessionRepository:
                       message_count, archived_at, pinned_at, created_at, updated_at
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "title": title,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "title": title,
+                },
+            )
             row = result.one_or_none()
             return _row_to_session(row) if row else None
 
@@ -213,9 +227,7 @@ class SessionRepository:
             "user_id": user_id,
         }
         if query:
-            filters.append(
-                "(LOWER(s.title) LIKE :query OR LOWER(sp.name) LIKE :query)"
-            )
+            filters.append("(LOWER(s.title) LIKE :query OR LOWER(sp.name) LIKE :query)")
             params["query"] = f"%{query.lower()}%"
         if space_id:
             filters.append("s.space_id = :space_id")
@@ -261,9 +273,9 @@ class SessionRepository:
             AND user_id    = :user_id
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id, "tenant_id": tenant_id, "user_id": user_id
-            })
+            result = await db.execute(
+                sql, {"session_id": session_id, "tenant_id": tenant_id, "user_id": user_id}
+            )
             return result.rowcount > 0
 
     async def update_summary(self, session_id: str, summary: str) -> None:
@@ -299,20 +311,27 @@ class SessionRepository:
             WHERE session_id = :session_id
         """)
         async with get_db() as db:
-            await db.execute(insert_sql, {
-                "message_id":  message_id,
-                "session_id":  session_id,
-                "tenant_id":   tenant_id,
-                "user_id":     user_id,
-                "role":        role,
-                "content":     content,
-                "token_count": token_count,
-            })
+            await db.execute(
+                insert_sql,
+                {
+                    "message_id": message_id,
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "role": role,
+                    "content": content,
+                    "token_count": token_count,
+                },
+            )
             await db.execute(inc_sql, {"session_id": session_id})
         return Message(
-            message_id=message_id, session_id=session_id,
-            tenant_id=tenant_id, user_id=user_id,
-            role=role, content=content, token_count=token_count,
+            message_id=message_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role=role,
+            content=content,
+            token_count=token_count,
         )
 
     async def get_all_messages(
@@ -330,11 +349,14 @@ class SessionRepository:
             ORDER BY created_at ASC
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
 
@@ -354,12 +376,15 @@ class SessionRepository:
             LIMIT :n
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "n": n,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "n": n,
+                },
+            )
             rows = result.fetchall()
         return [_row_to_message(r) for r in rows]
 
@@ -379,12 +404,15 @@ class SessionRepository:
             LIMIT :n
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "n": n,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "n": n,
+                },
+            )
             rows = result.fetchall()
         # DESC 取出后反转为正序
         return [_row_to_message(r) for r in reversed(rows)]
@@ -410,12 +438,15 @@ class SessionRepository:
             OFFSET :skip_first
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "session_id":  session_id,
-                "tenant_id":   tenant_id,
-                "user_id":     user_id,
-                "skip_first":  skip_first,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "skip_first": skip_first,
+                },
+            )
             rows = result.fetchall()
         messages = [_row_to_message(r) for r in rows]
         if skip_last > 0:
@@ -424,6 +455,7 @@ class SessionRepository:
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _row_to_session(row) -> Session:
     r = dict(row._mapping)
@@ -467,10 +499,6 @@ def _row_to_message(row) -> Message:
         token_count=r.get("token_count", 0),
         processing_status=r.get("processing_status"),
         processing_error=r.get("processing_error"),
-        client_request_id=(
-            str(r["client_request_id"])
-            if r.get("client_request_id")
-            else None
-        ),
+        client_request_id=(str(r["client_request_id"]) if r.get("client_request_id") else None),
         created_at=r["created_at"],
     )

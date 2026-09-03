@@ -196,10 +196,12 @@ async def test_session_service_batch_hydrates_messages_without_n_plus_one() -> N
         error_message=None,
     )
     session_repo = _SessionRepository(messages)
-    citation_repo = _CitationRepository({
-        "answer-1": [{"doc_id": "document-1", "rank": 1}],
-        "turn-1": [{"doc_id": "must-not-leak-to-user", "rank": 1}],
-    })
+    citation_repo = _CitationRepository(
+        {
+            "answer-1": [{"doc_id": "document-1", "rank": 1}],
+            "turn-1": [{"doc_id": "must-not-leak-to-user", "rank": 1}],
+        }
+    )
     attachment_repo = _AttachmentRepository({"turn-1": [attachment]})
     service = SessionService(
         session_repo=session_repo,

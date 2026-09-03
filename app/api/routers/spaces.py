@@ -25,7 +25,7 @@ class SpaceOut(BaseModel):
 
 
 @router.get("", response_model=list[SpaceOut])
-async def list_spaces(ctx: UserContext = Depends(require_user))-> list[SpaceOut]:
+async def list_spaces(ctx: UserContext = Depends(require_user)) -> list[SpaceOut]:
     spaces = await _service.list_spaces(ctx.tenant_id)
     return [
         SpaceOut(
@@ -78,5 +78,3 @@ async def restore_space(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Space not found",
         )
-
-

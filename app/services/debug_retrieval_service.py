@@ -17,7 +17,7 @@ from app.services.tenant_config_service import TenantConfigService
 
 _FAKE_QUOTA = QuotaSnapshot(
     max_documents=10000,
-    max_storage_bytes=10 * 1024 ** 3,
+    max_storage_bytes=10 * 1024**3,
     max_api_calls_per_day=100000,
     used_documents=0,
     used_storage_bytes=0,
@@ -35,7 +35,7 @@ _ANSWER_SYSTEM_PROMPT = """\
 
 class DebugSearchRequest(BaseModel):
     query: str
-    space_id: str = ''
+    space_id: str = ""
     top_k: int = 10
     score_threshold: float = 0.5
     query_rewrite_enabled: bool = True
@@ -55,9 +55,7 @@ def _rrf_fuse(
     scores: dict[str, float] = {}
     hit_map: dict[str, SearchHit] = {}
     for hits in (vector_hits, keyword_hits):
-        for rank, hit in enumerate(
-            sorted(hits, key=lambda h: h.score, reverse=True), start=1
-        ):
+        for rank, hit in enumerate(sorted(hits, key=lambda h: h.score, reverse=True), start=1):
             scores[hit.chunk_id] = scores.get(hit.chunk_id, 0.0) + 1.0 / (rrf_k + rank)
             hit_map.setdefault(hit.chunk_id, hit)
     sorted_ids = sorted(scores, key=lambda cid: scores[cid], reverse=True)[:top_k]
@@ -93,15 +91,17 @@ def _to_debug_hits(
     out = []
     for h in hits:
         meta = content_map.get(h.chunk_id, {})
-        out.append({
-            "chunk_id":    h.chunk_id,
-            "document_id": h.document_id,
-            "doc_name":    meta.get("original_name", h.document_id),
-            "chunk_index": h.chunk_index,
-            "content":     meta.get("content", ""),
-            "score":       h.score,
-            "source":      source,
-        })
+        out.append(
+            {
+                "chunk_id": h.chunk_id,
+                "document_id": h.document_id,
+                "doc_name": meta.get("original_name", h.document_id),
+                "chunk_index": h.chunk_index,
+                "content": meta.get("content", ""),
+                "score": h.score,
+                "source": source,
+            }
+        )
     return out
 
 
@@ -159,9 +159,7 @@ class DebugRetrievalService:
 
         # Stage 4: RRF Fusion（内联，支持 rrf_k 参数覆盖）
         t = time.monotonic()
-        rrf_hits = _rrf_fuse(
-            search_ctx.vector_hits, search_ctx.keyword_hits, req.top_k, req.rrf_k
-        )
+        rrf_hits = _rrf_fuse(search_ctx.vector_hits, search_ctx.keyword_hits, req.top_k, req.rrf_k)
         search_ctx = replace(search_ctx, ranked_hits=rrf_hits)
         timings["rrf_fusion"] = (time.monotonic() - t) * 1000
 
@@ -180,21 +178,19 @@ class DebugRetrievalService:
 
         answer: str | None = None
         if req.include_answer:
-            answer = await self._generate_answer(
-                final_hits, content_map, req.query, ctx
-            )
+            answer = await self._generate_answer(final_hits, content_map, req.query, ctx)
 
         return {
-            "query_text":       req.query,
+            "query_text": req.query,
             "rewritten_queries": search_ctx.query.expanded_queries,
-            "intent_is_valid":  search_ctx.query.intent_is_valid,
-            "vector_hits":      _to_debug_hits(search_ctx.vector_hits, content_map, "vector"),
-            "keyword_hits":     _to_debug_hits(search_ctx.keyword_hits, content_map, "keyword"),
-            "rrf_hits":         _to_debug_hits(search_ctx.ranked_hits, content_map, "rrf"),
-            "final_hits":       _to_debug_hits(final_hits, content_map, "rerank"),
-            "timings_ms":       timings,
-            "params":           req.model_dump(),
-            "answer":           answer,
+            "intent_is_valid": search_ctx.query.intent_is_valid,
+            "vector_hits": _to_debug_hits(search_ctx.vector_hits, content_map, "vector"),
+            "keyword_hits": _to_debug_hits(search_ctx.keyword_hits, content_map, "keyword"),
+            "rrf_hits": _to_debug_hits(search_ctx.ranked_hits, content_map, "rrf"),
+            "final_hits": _to_debug_hits(final_hits, content_map, "rerank"),
+            "timings_ms": timings,
+            "params": req.model_dump(),
+            "answer": answer,
         }
 
     async def _generate_answer(
@@ -217,6 +213,7 @@ class DebugRetrievalService:
         system_prompt = _ANSWER_SYSTEM_PROMPT.format(context=context_str)
 
         from app.providers.llm.model_hub import model_hub
+
         provider = model_hub.get_provider(ctx)
         messages = [
             ChatMessage(role="system", content=system_prompt),

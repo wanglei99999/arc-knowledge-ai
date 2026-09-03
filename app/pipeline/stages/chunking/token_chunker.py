@@ -19,8 +19,8 @@ def _estimate_tokens(text: str) -> int:
     return count_tokens(text)
 
 
-#文本切割算法如下：
-#文本 → 按双换行拆成段落
+# 文本切割算法如下：
+# 文本 → 按双换行拆成段落
 #        ↓
 #        每个段落累积 token 数
 #        ↓
@@ -84,6 +84,7 @@ def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
         chunks.append("\n\n".join(current))
 
     return chunks if chunks else [text]
+
 
 @registry.stage("token_chunker")
 class TokenChunkerStage(BaseStage[ParsedDocument, list[DocumentChunk]]):

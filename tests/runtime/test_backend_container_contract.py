@@ -16,3 +16,11 @@ def test_backend_context_excludes_secrets_and_host_environments():
     ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     for required in (".env", ".venv", ".git", "__pycache__", ".pytest_cache"):
         assert required in ignored
+
+
+def test_backend_source_copy_does_not_reown_the_entire_dependency_layer():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "chown -R app:app /app" not in dockerfile
+    assert "COPY --chown=app:app app ./app" in dockerfile
+    assert "COPY --chown=app:app scripts ./scripts" in dockerfile

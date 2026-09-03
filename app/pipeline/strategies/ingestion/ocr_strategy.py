@@ -3,12 +3,12 @@ from __future__ import annotations
 from app.pipeline.core.context import TenantConfig
 from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.registry import registry
-from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
-from app.pipeline.stages.embedding.embed_stage import EmbedStage
 from app.pipeline.hooks.idempotency_guard import IdempotencyGuard
 from app.pipeline.hooks.observability_hook import ObservabilityHook
 from app.pipeline.hooks.quota_guard import QuotaGuard
 from app.pipeline.hooks.tenant_guard import TenantGuard
+from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage
+from app.pipeline.stages.embedding.embed_stage import EmbedStage
 from app.pipeline.stages.embedding.es_index_stage import ESIndexStage
 from app.pipeline.stages.embedding.milvus_index_stage import MilvusIndexStage
 from app.pipeline.stages.parsing.parser_stage import ParserStage
@@ -20,8 +20,10 @@ class OCRIngestionStrategy(BaseStrategy):
     """
     扫描件入库策略，使用 PaddleOCR 解析。
 
-    Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage → MilvusIndexStage → ESIndexStage
-    Hooks（按 priority 顺序）：TenantGuard(10) → QuotaGuard(20) → IdempotencyGuard(30) → ObservabilityHook(100)
+    Pipeline：ParserStage(paddleocr) → TokenChunkerStage → EmbedStage
+    → MilvusIndexStage → ESIndexStage
+    Hooks：TenantGuard(10) → QuotaGuard(20) → IdempotencyGuard(30)
+    → ObservabilityHook(100)
     """
 
     strategy_id = "ocr"

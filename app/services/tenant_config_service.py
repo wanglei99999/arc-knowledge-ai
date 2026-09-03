@@ -27,6 +27,7 @@ class TenantConfigService:
         allowed: list[str] = row.get("allowed_models") or []
         if isinstance(allowed, str):
             import json
+
             allowed = json.loads(allowed)
 
         return TenantConfig(

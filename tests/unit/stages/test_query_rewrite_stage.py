@@ -1,18 +1,17 @@
 """QueryRewriteStage 单元测试"""
+
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
-
-import pytest
+from collections.abc import AsyncIterator
 
 from app.domain.retrieval import RetrievalQuery, SearchContext
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.stages.retrieval.query_rewrite_stage import QueryRewriteStage
 from app.providers.base import ChatMessage, HealthStatus, LLMProvider
 
-
 # ── Fake LLM ──────────────────────────────────────────────────────────────────
+
 
 class FakeLLMProvider(LLMProvider):
     provider_id = "fake_llm"
@@ -50,10 +49,15 @@ class ErrorLLMProvider(LLMProvider):
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 def _make_ctx(query_rewrite_enabled: bool = True) -> ProcessingContext:
     quota = QuotaSnapshot(
-        max_documents=100, max_storage_bytes=1024, max_api_calls_per_day=1000,
-        used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+        max_documents=100,
+        max_storage_bytes=1024,
+        max_api_calls_per_day=1000,
+        used_documents=0,
+        used_storage_bytes=0,
+        used_api_calls_today=0,
     )
     config = TenantConfig(
         tenant_id="test-tenant",
@@ -68,18 +72,23 @@ def _make_ctx(query_rewrite_enabled: bool = True) -> ProcessingContext:
 
 
 def _search_ctx(query_text: str = "向量数据库怎么选") -> SearchContext:
-    return SearchContext(
-        query=RetrievalQuery(query_text=query_text, tenant_id="test-tenant")
-    )
+    return SearchContext(query=RetrievalQuery(query_text=query_text, tenant_id="test-tenant"))
 
 
 # ── 正常路径 ───────────────────────────────────────────────────────────────────
 
+
 async def test_valid_query_expands_and_marks_valid() -> None:
-    llm_response = json.dumps({
-        "is_knowledge_query": True,
-        "expanded_queries": ["如何选择向量数据库", "向量数据库选型对比", "主流向量数据库优缺点"],
-    })
+    llm_response = json.dumps(
+        {
+            "is_knowledge_query": True,
+            "expanded_queries": [
+                "如何选择向量数据库",
+                "向量数据库选型对比",
+                "主流向量数据库优缺点",
+            ],
+        }
+    )
     stage = QueryRewriteStage(provider=FakeLLMProvider(llm_response))
     ctx = _make_ctx()
     result = await stage._execute(ctx, _search_ctx())
@@ -90,10 +99,12 @@ async def test_valid_query_expands_and_marks_valid() -> None:
 
 
 async def test_chitchat_marks_invalid_and_empty_queries() -> None:
-    llm_response = json.dumps({
-        "is_knowledge_query": False,
-        "expanded_queries": [],
-    })
+    llm_response = json.dumps(
+        {
+            "is_knowledge_query": False,
+            "expanded_queries": [],
+        }
+    )
     stage = QueryRewriteStage(provider=FakeLLMProvider(llm_response))
     ctx = _make_ctx()
     result = await stage._execute(ctx, _search_ctx("你好"))
@@ -103,10 +114,12 @@ async def test_chitchat_marks_invalid_and_empty_queries() -> None:
 
 
 async def test_original_query_text_preserved() -> None:
-    llm_response = json.dumps({
-        "is_knowledge_query": True,
-        "expanded_queries": ["变体1", "变体2", "变体3"],
-    })
+    llm_response = json.dumps(
+        {
+            "is_knowledge_query": True,
+            "expanded_queries": ["变体1", "变体2", "变体3"],
+        }
+    )
     stage = QueryRewriteStage(provider=FakeLLMProvider(llm_response))
     ctx = _make_ctx()
     original = _search_ctx("RAG 是什么")
@@ -116,6 +129,7 @@ async def test_original_query_text_preserved() -> None:
 
 
 # ── 降级路径 ───────────────────────────────────────────────────────────────────
+
 
 async def test_llm_failure_falls_back_to_passthrough() -> None:
     stage = QueryRewriteStage(provider=ErrorLLMProvider())
@@ -140,10 +154,12 @@ async def test_invalid_json_falls_back_to_passthrough() -> None:
 
 async def test_empty_expanded_queries_filtered() -> None:
     # LLM 返回含空字符串的 expanded_queries
-    llm_response = json.dumps({
-        "is_knowledge_query": True,
-        "expanded_queries": ["valid query", "", "  ", "another valid"],
-    })
+    llm_response = json.dumps(
+        {
+            "is_knowledge_query": True,
+            "expanded_queries": ["valid query", "", "  ", "another valid"],
+        }
+    )
     stage = QueryRewriteStage(provider=FakeLLMProvider(llm_response))
     ctx = _make_ctx()
     result = await stage._execute(ctx, _search_ctx())
@@ -152,6 +168,7 @@ async def test_empty_expanded_queries_filtered() -> None:
 
 
 # ── 开关控制 ───────────────────────────────────────────────────────────────────
+
 
 async def test_disabled_returns_passthrough_without_llm_call() -> None:
     stage = QueryRewriteStage(provider=ErrorLLMProvider())

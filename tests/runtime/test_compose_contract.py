@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import yaml
+from email_validator import validate_email
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -123,10 +124,27 @@ def test_optional_model_services_are_offline_and_infinity_models_are_read_only()
     assert "./models:/models:ro" in services["infinity"]["volumes"]
 
 
+def test_core_application_services_never_download_hugging_face_models_at_runtime():
+    services = load_compose()["services"]
+
+    for name in ("migrate", "api", "worker"):
+        assert services[name]["environment"]["HF_HUB_OFFLINE"] == "${HF_HUB_OFFLINE:-1}"
+        assert services[name]["environment"]["TRANSFORMERS_OFFLINE"] == (
+            "${TRANSFORMERS_OFFLINE:-1}"
+        )
+
+
 def test_milvus_metrics_port_stays_inside_compose_network():
     ports = load_compose()["services"]["milvus"]["ports"]
 
     assert all(not str(port).endswith(":9091") for port in ports)
+
+
+def test_temporal_healthcheck_uses_the_compose_network_address():
+    healthcheck = load_compose()["services"]["temporal"]["healthcheck"]["test"]
+
+    assert "temporal:7233" in healthcheck
+    assert "127.0.0.1:7233" not in healthcheck
 
 
 def test_named_volumes_cover_persistent_services():
@@ -179,3 +197,9 @@ def test_env_example_exposes_all_host_and_model_overrides_without_real_keys():
         "INCIPIT_OPTIONAL_SERVICES",
     } <= values.keys()
     assert "sk-" not in (ROOT / ".env.example").read_text(encoding="utf-8")
+
+
+def test_default_smoke_email_is_accepted_by_the_api_validator():
+    email = load_env_example()["SMOKE_EMAIL"]
+
+    assert validate_email(email, check_deliverability=False).normalized == email

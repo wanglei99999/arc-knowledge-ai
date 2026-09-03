@@ -53,15 +53,20 @@ class RerankStage(BaseStage[SearchContext, list[SearchHit]]):
 
         provider = self._get_provider(ctx)
         if provider is None:
-            logger.warning("RerankStage: provider %r not found, skipping rerank", ctx.config.rerank_provider)
+            logger.warning(
+                "RerankStage: provider %r not found, skipping rerank", ctx.config.rerank_provider
+            )
             return hits
 
         if await provider.health_check() != HealthStatus.HEALTHY:
-            logger.debug("RerankStage: provider %r unavailable, using RRF order", ctx.config.rerank_provider)
+            logger.debug(
+                "RerankStage: provider %r unavailable, using RRF order", ctx.config.rerank_provider
+            )
             return hits
 
         try:
             from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+
             chunk_repo = ChunkRepository()
             chunks = await chunk_repo.get_chunks_by_ids(
                 [h.chunk_id for h in hits],
@@ -87,14 +92,16 @@ class RerankStage(BaseStage[SearchContext, list[SearchHit]]):
             for new_rank, (doc_idx, score) in enumerate(ranked, start=1):
                 original_idx = valid_indices[doc_idx]
                 hit = hits[original_idx]
-                results.append(SearchHit(
-                    chunk_id=hit.chunk_id,
-                    document_id=hit.document_id,
-                    chunk_index=hit.chunk_index,
-                    score=score,
-                    source=hit.source,
-                    rank=new_rank,
-                ))
+                results.append(
+                    SearchHit(
+                        chunk_id=hit.chunk_id,
+                        document_id=hit.document_id,
+                        chunk_index=hit.chunk_index,
+                        score=score,
+                        source=hit.source,
+                        rank=new_rank,
+                    )
+                )
             return results
 
         except Exception:

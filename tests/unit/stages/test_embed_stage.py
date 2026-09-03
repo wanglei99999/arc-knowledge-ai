@@ -1,4 +1,5 @@
 """EmbedStage 单元测试——用 FakeEmbeddingProvider 替代真实 API"""
+
 import pytest
 
 from app.domain.document import DocumentChunk

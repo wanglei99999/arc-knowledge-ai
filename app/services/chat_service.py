@@ -171,9 +171,7 @@ class ChatService:
     async def stream_attachment_answer(self, req) -> AsyncIterator[str | list]:
         """回答已持久化的用户 Turn，只使用本轮附件作为事实来源。"""
         working_memory, rag_result = await asyncio.gather(
-            self._manager.load_working_memory(
-                req.session_id, req.tenant_id, req.user_id
-            ),
+            self._manager.load_working_memory(req.session_id, req.tenant_id, req.user_id),
             self._orchestrator.retrieve(
                 query_text=req.query,
                 tenant_id=req.tenant_id,
@@ -210,14 +208,16 @@ class ChatService:
             space_id=req.space_id,
             citations=citations,
         )
-        asyncio.create_task(self._extractor.run_post_persist(
-            assistant_message=assistant_message,
-            session_id=req.session_id,
-            tenant_id=req.tenant_id,
-            user_id=req.user_id,
-            llm_provider_name=req.llm_provider_name,
-            embedding_provider_name=req.embedding_provider_name,
-        ))
+        asyncio.create_task(
+            self._extractor.run_post_persist(
+                assistant_message=assistant_message,
+                session_id=req.session_id,
+                tenant_id=req.tenant_id,
+                user_id=req.user_id,
+                llm_provider_name=req.llm_provider_name,
+                embedding_provider_name=req.embedding_provider_name,
+            )
+        )
         if citations:
             yield citations
 

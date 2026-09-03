@@ -131,6 +131,27 @@ Describe 'Invoke-IncipitDoctor' {
         $portCheck.Detail | Should -Match 'project container'
     }
 
+    It 'accepts occupied ports rendered as a Compose port range' {
+        Mock Test-IncipitPort {
+            param([int]$Port)
+            return $Port -in @(9000, 9001)
+        } -ModuleName Incipit.Runtime
+        Mock Invoke-IncipitDocker {
+            param([string[]]$Arguments)
+
+            switch ($Arguments[0]) {
+                'info' { return '{"MemTotal":17179869184}' }
+                'ps' { return '127.0.0.1:9000-9001->9000-9001/tcp' }
+                default { return 'ok' }
+            }
+        } -ModuleName Incipit.Runtime
+
+        $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
+
+        ($checks | Where-Object Name -eq 'port:9000').State | Should -Be 'PASS'
+        ($checks | Where-Object Name -eq 'port:9001').State | Should -Be 'PASS'
+    }
+
     It 'returns no required failures on a clean mocked machine' {
         $checks = @(Invoke-IncipitDoctor -RootPath $doctorRoot -FrontendPath $repoRoot)
         $requiredFailures = @($checks | Where-Object { $_.Required -and $_.State -eq 'FAIL' })
@@ -325,12 +346,16 @@ Describe 'Start-IncipitApplications ordering' {
         Mock Wait-IncipitWorker {
             $global:IncipitApplicationEvents.Add('wait-worker')
         } -ModuleName Incipit.Runtime
+        Mock Wait-IncipitServices {
+            param([string[]]$Services)
+            $global:IncipitApplicationEvents.Add("wait-container:$($Services -join ',')")
+        } -ModuleName Incipit.Runtime
     }
 
     It 'waits for API before worker and worker before web' {
         Start-IncipitApplications -ProfileArguments @()
 
-        ($global:IncipitApplicationEvents -join ',') | Should -Be 'compose up -d api,wait-api,compose up -d worker,wait-worker,compose up -d web,wait-web'
+        ($global:IncipitApplicationEvents -join ',') | Should -Be 'compose up -d api,wait-api,compose up -d worker,wait-worker,compose up -d web,wait-container:web,wait-web'
     }
 }
 

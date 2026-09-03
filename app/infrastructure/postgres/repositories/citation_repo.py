@@ -49,17 +49,17 @@ class CitationRepository:
 
         rows = [
             {
-                "id":               str(uuid.uuid4()),
-                "message_id":       message_id,
-                "tenant_id":        tenant_id,
-                "space_id":         _valid_uuid(space_id),
-                "document_id":      _valid_uuid(c.get("doc_id")),
-                "chunk_id":         _valid_uuid(c.get("chunk_id")),
-                "rank":             idx + 1,
-                "score":            c.get("score"),
-                "retrieval_mode":   c.get("source", "unknown"),
+                "id": str(uuid.uuid4()),
+                "message_id": message_id,
+                "tenant_id": tenant_id,
+                "space_id": _valid_uuid(space_id),
+                "document_id": _valid_uuid(c.get("doc_id")),
+                "chunk_id": _valid_uuid(c.get("chunk_id")),
+                "rank": idx + 1,
+                "score": c.get("score"),
+                "retrieval_mode": c.get("source", "unknown"),
                 "content_snapshot": c.get("content", ""),
-                "title_snapshot":   c.get("doc_name"),
+                "title_snapshot": c.get("doc_name"),
             }
             for idx, c in enumerate(citations)
         ]
@@ -82,23 +82,28 @@ class CitationRepository:
             ORDER BY message_id, rank
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "message_ids": message_ids,
-                "tenant_id": tenant_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "message_ids": message_ids,
+                    "tenant_id": tenant_id,
+                },
+            )
             rows = result.fetchall()
 
         grouped: dict[str, list[dict]] = {}
         for row in rows:
             r = dict(row._mapping)
             mid = str(r["message_id"])
-            grouped.setdefault(mid, []).append({
-                "doc_id":      str(r["document_id"]) if r["document_id"] else None,
-                "chunk_id":    str(r["chunk_id"]) if r["chunk_id"] else None,
-                "doc_name":    r["title_snapshot"],
-                "content":     r["content_snapshot"],
-                "score":       r["score"],
-                "source":      r["retrieval_mode"],
-                "rank":        r["rank"],
-            })
+            grouped.setdefault(mid, []).append(
+                {
+                    "doc_id": str(r["document_id"]) if r["document_id"] else None,
+                    "chunk_id": str(r["chunk_id"]) if r["chunk_id"] else None,
+                    "doc_name": r["title_snapshot"],
+                    "content": r["content_snapshot"],
+                    "score": r["score"],
+                    "source": r["retrieval_mode"],
+                    "rank": r["rank"],
+                }
+            )
         return grouped

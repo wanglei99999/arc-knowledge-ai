@@ -54,9 +54,7 @@ async def test_active_turn_query_is_owned_and_covers_both_busy_states(
     db = _FakeDB(_Result(scalar=True))
     _patch_db(monkeypatch, turn_module, db)
 
-    active = await ChatTurnRepository().has_active_turn(
-        "session-1", "tenant-1", "user-1"
-    )
+    active = await ChatTurnRepository().has_active_turn("session-1", "tenant-1", "user-1")
 
     assert active is True
     sql, params = db.calls[0]
@@ -76,15 +74,21 @@ async def test_active_turn_query_is_owned_and_covers_both_busy_states(
 async def test_space_lookup_is_tenant_scoped_and_maps_archived_status(
     monkeypatch,
 ) -> None:
-    db = _FakeDB(_Result(row=SimpleNamespace(_mapping={
-        "id": "space-1",
-        "tenant_id": "tenant-1",
-        "space_key": "product-docs",
-        "name": "产品文档",
-        "status": "archived",
-        "created_by": "user-1",
-        "created_at": datetime(2026, 8, 1, tzinfo=UTC),
-    })))
+    db = _FakeDB(
+        _Result(
+            row=SimpleNamespace(
+                _mapping={
+                    "id": "space-1",
+                    "tenant_id": "tenant-1",
+                    "space_key": "product-docs",
+                    "name": "产品文档",
+                    "status": "archived",
+                    "created_by": "user-1",
+                    "created_at": datetime(2026, 8, 1, tzinfo=UTC),
+                }
+            )
+        )
+    )
     _patch_db(monkeypatch, space_module, db)
 
     space = await SpaceRepository().get_by_id("tenant-1", "space-1")

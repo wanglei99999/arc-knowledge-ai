@@ -367,6 +367,7 @@ async def run_l1(
             )
             _require_status(login, stage)
             headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+            client.headers.update(headers)
             checks.append(_check(stage, "PASS", "authenticated", started))
 
             stage = "space-create"
@@ -500,7 +501,7 @@ def config_from_env(args: argparse.Namespace) -> SmokeConfig:
         api_base_url=args.api_base_url,
         web_base_url=args.web_base_url,
         tenant_id=os.environ.get("SMOKE_TENANT_ID", "r0-smoke"),
-        email=os.environ.get("SMOKE_EMAIL", "r0-smoke@local.invalid"),
+        email=os.environ.get("SMOKE_EMAIL", "r0-smoke@example.com"),
         password=os.environ["SMOKE_PASSWORD"],
         timeout_seconds=args.timeout_seconds,
     )

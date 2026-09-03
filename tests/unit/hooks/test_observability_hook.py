@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
+from app.domain.retrieval import RetrievalQuery, SearchContext, SearchHit
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.stage import BaseStage
 from app.pipeline.hooks.observability_hook import ObservabilityHook
+from app.providers.base import ChatMessage, HealthStatus, LLMProvider
+from app.providers.llm.traced_llm import TracedLLMProvider
 
 
 class _EchoA(BaseStage[object, object]):
@@ -39,9 +42,6 @@ async def test_stage_spans_are_children_of_pipeline_span(fake_ctx, span_exporter
         assert spans[name].parent is not None, f"{name} 没有父 span"
         assert spans[name].parent.span_id == root.context.span_id
         assert spans[name].context.trace_id == root.context.trace_id
-
-
-from app.domain.retrieval import RetrievalQuery, SearchContext, SearchHit
 
 
 class _Vectorish(BaseStage[SearchContext, SearchContext]):
@@ -80,10 +80,6 @@ async def test_exploding_extractor_does_not_break_pipeline(fake_ctx, span_export
     pipeline = Pipeline(stages=[_EchoA()], hooks=[ObservabilityHook()])
     result = await pipeline.run(fake_ctx, "ok")
     assert result == "ok"  # 业务无感
-
-
-from app.providers.base import ChatMessage, HealthStatus, LLMProvider
-from app.providers.llm.traced_llm import TracedLLMProvider
 
 
 class _MiniLLM(LLMProvider):

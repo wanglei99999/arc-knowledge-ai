@@ -29,11 +29,13 @@ async def test_retrieve_threads_scope_and_drops_out_of_scope_hits(monkeypatch) -
     class _ChunkRepo:
         async def get_chunks_by_ids(self, chunk_ids, tenant_id):
             captured["chunk_ids"] = chunk_ids
-            return [{
-                "chunk_id": "chunk-1",
-                "document_id": DOC1,
-                "content": "允许的文档内容",
-            }]
+            return [
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": DOC1,
+                    "content": "允许的文档内容",
+                }
+            ]
 
     orchestrator = RAGOrchestrator()
     orchestrator._chunk_repo = _ChunkRepo()

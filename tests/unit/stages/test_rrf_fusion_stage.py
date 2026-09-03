@@ -1,4 +1,5 @@
 """RRFFusionStage 单元测试"""
+
 import pytest
 
 from app.domain.retrieval import RetrievalQuery, SearchContext, SearchHit
@@ -9,8 +10,12 @@ from app.pipeline.stages.retrieval.rrf_fusion_stage import RRFFusionStage
 @pytest.fixture
 def ctx() -> ProcessingContext:
     quota = QuotaSnapshot(
-        max_documents=100, max_storage_bytes=1024, max_api_calls_per_day=1000,
-        used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+        max_documents=100,
+        max_storage_bytes=1024,
+        max_api_calls_per_day=1000,
+        used_documents=0,
+        used_storage_bytes=0,
+        used_api_calls_today=0,
     )
     return ProcessingContext.create(
         tenant_id="test-tenant",
@@ -25,7 +30,9 @@ def _query(top_k: int = 5) -> RetrievalQuery:
 
 
 def _hit(chunk_id: str, score: float, source: str = "vector") -> SearchHit:
-    return SearchHit(chunk_id=chunk_id, document_id="doc-1", chunk_index=0, score=score, source=source)
+    return SearchHit(
+        chunk_id=chunk_id, document_id="doc-1", chunk_index=0, score=score, source=source
+    )
 
 
 @pytest.fixture
@@ -34,6 +41,7 @@ def stage() -> RRFFusionStage:
 
 
 # ── 输出类型 ───────────────────────────────────────────────────────────────────
+
 
 async def test_returns_search_context(ctx, stage) -> None:
     search_ctx = SearchContext(
@@ -57,6 +65,7 @@ async def test_ranked_hits_populated(ctx, stage) -> None:
 
 # ── RRF 融合逻辑 ───────────────────────────────────────────────────────────────
 
+
 async def test_overlap_chunk_gets_higher_score(ctx, stage) -> None:
     # c1 同时出现在向量和关键词结果中，分数应高于只出现一次的 c2
     search_ctx = SearchContext(
@@ -73,7 +82,9 @@ async def test_overlap_chunk_gets_higher_score(ctx, stage) -> None:
 async def test_top_k_respected(ctx, stage) -> None:
     vector_hits = [_hit(f"v{i}", float(10 - i)) for i in range(8)]
     keyword_hits = [_hit(f"k{i}", float(10 - i), "keyword") for i in range(8)]
-    search_ctx = SearchContext(query=_query(top_k=5), vector_hits=vector_hits, keyword_hits=keyword_hits)
+    search_ctx = SearchContext(
+        query=_query(top_k=5), vector_hits=vector_hits, keyword_hits=keyword_hits
+    )
     result = await stage._execute(ctx, search_ctx)
     assert len(result.ranked_hits) == 5
 

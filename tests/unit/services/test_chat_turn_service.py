@@ -91,18 +91,12 @@ class _TurnRepo:
             item = replace(
                 self.turn.attachments[0],
                 ignored=kwargs["ignored"],
-                status=(
-                    AttachmentStatus.IGNORED
-                    if kwargs["ignored"]
-                    else AttachmentStatus.FAILED
-                ),
+                status=(AttachmentStatus.IGNORED if kwargs["ignored"] else AttachmentStatus.FAILED),
             )
             self.turn = replace(
                 self.turn,
                 attachments=[item],
-                readiness=(
-                    TurnReadiness.EMPTY if kwargs["ignored"] else TurnReadiness.BLOCKED
-                ),
+                readiness=(TurnReadiness.EMPTY if kwargs["ignored"] else TurnReadiness.BLOCKED),
             )
         return True
 
@@ -193,8 +187,7 @@ def _service(
 async def test_create_rejects_more_than_five_attachments() -> None:
     service, *_ = _service()
     attachments = [
-        AttachmentDeclaration(str(i), f"{i}.pdf", "application/pdf", 9)
-        for i in range(6)
+        AttachmentDeclaration(str(i), f"{i}.pdf", "application/pdf", 9) for i in range(6)
     ]
 
     with pytest.raises(ChatTurnValidationError, match="5"):
@@ -219,9 +212,7 @@ async def test_create_rejects_blank_question() -> None:
             tenant_id="tenant-1",
             user_id="user-1",
             query="  ",
-            attachments=[
-                AttachmentDeclaration("client-1", "a.pdf", "application/pdf", 9)
-            ],
+            attachments=[AttachmentDeclaration("client-1", "a.pdf", "application/pdf", 9)],
         )
 
 
@@ -261,9 +252,7 @@ async def test_create_reads_trusted_space_from_owned_session() -> None:
         tenant_id="tenant-1",
         user_id="user-1",
         query=" 总结 ",
-        attachments=[
-            AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 9)
-        ],
+        attachments=[AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 9)],
     )
 
     assert turn_repo.created[0]["space_id"] == "space-1"
@@ -295,9 +284,7 @@ async def test_upload_rejects_attachment_from_other_user() -> None:
         ("contract.pdf", "application/pdf", b"not-pdf!"),
     ],
 )
-async def test_upload_rejects_actual_name_mime_or_size_mismatch(
-    file_name, mime_type, data
-) -> None:
+async def test_upload_rejects_actual_name_mime_or_size_mismatch(file_name, mime_type, data) -> None:
     service, *_ = _service(turn=_turn())
 
     with pytest.raises(ChatTurnValidationError):
@@ -318,9 +305,7 @@ async def test_upload_reuses_existing_document_link() -> None:
         document_id="document-1",
         status=AttachmentStatus.INGESTING,
     )
-    service, turn_repo, chunk_repo, document_service = _service(
-        turn=_turn(attachments=[linked])
-    )
+    service, turn_repo, chunk_repo, document_service = _service(turn=_turn(attachments=[linked]))
 
     result = await service.upload_attachment(
         turn_id="turn-1",
@@ -390,9 +375,7 @@ async def test_add_attachment_reopens_empty_turn() -> None:
     service, turn_repo, *_ = _service(
         turn=_turn(attachments=[ignored], readiness=TurnReadiness.EMPTY)
     )
-    declaration = AttachmentDeclaration(
-        "client-2", "appendix.pdf", "application/pdf", 9
-    )
+    declaration = AttachmentDeclaration("client-2", "appendix.pdf", "application/pdf", 9)
 
     turn = await service.add_attachment(
         turn_id="turn-1",
@@ -409,9 +392,7 @@ async def test_add_attachment_reopens_empty_turn() -> None:
 async def test_cancel_unlocks_waiting_turn() -> None:
     service, turn_repo, *_ = _service(turn=_turn())
 
-    turn = await service.cancel_turn(
-        turn_id="turn-1", tenant_id="tenant-1", user_id="user-1"
-    )
+    turn = await service.cancel_turn(turn_id="turn-1", tenant_id="tenant-1", user_id="user-1")
 
     assert turn.processing_status is TurnProcessingStatus.CANCELLED
     assert turn_repo.cancelled

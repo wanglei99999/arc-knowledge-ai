@@ -1,12 +1,13 @@
 """TokenChunkerStage 单元测试——无外部依赖"""
+
 import pytest
 
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.stages.chunking.token_chunker import TokenChunkerStage, _split_text
 from app.providers.base import ParsedDocument
 
-
 # ── _split_text 纯函数测试 ────────────────────────────────────────────────────
+
 
 def test_split_empty_text() -> None:
     assert _split_text("", 512, 64) == []
@@ -27,7 +28,7 @@ def test_split_long_text_multiple_chunks() -> None:
 
 
 def test_overlap_carries_content() -> None:
-    para_a = "Alpha " * 60   # ~60 tokens
+    para_a = "Alpha " * 60  # ~60 tokens
     para_b = "Beta " * 60
     para_c = "Gamma " * 60
     text = "\n\n".join([para_a, para_b, para_c])
@@ -37,6 +38,7 @@ def test_overlap_carries_content() -> None:
 
 
 # ── Stage 测试 ────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_chunks_have_correct_document_id(fake_ctx: ProcessingContext) -> None:

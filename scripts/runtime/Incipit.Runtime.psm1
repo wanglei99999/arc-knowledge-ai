@@ -289,8 +289,18 @@ function Invoke-IncipitDoctor {
             $projectPortsText = ''
         }
     }
-    $projectPorts = @([regex]::Matches($projectPortsText, '(?::|^)(?<port>\d+)->') | ForEach-Object {
-        [int]$_.Groups['port'].Value
+    $projectPorts = @([regex]::Matches(
+        $projectPortsText,
+        '(?::|^)(?<start>\d+)(?:-(?<end>\d+))?->'
+    ) | ForEach-Object {
+        $startPort = [int]$_.Groups['start'].Value
+        $endPort = if ($_.Groups['end'].Success) {
+            [int]$_.Groups['end'].Value
+        }
+        else {
+            $startPort
+        }
+        $startPort..$endPort
     })
 
     $portDefaults = [ordered]@{
@@ -674,6 +684,7 @@ function Start-IncipitApplications {
 
     $arguments = @('compose') + @($ProfileArguments) + @('up', '-d', 'web')
     $null = Invoke-IncipitDocker -Arguments $arguments
+    $null = Wait-IncipitServices -Services @('web') -ProfileArguments $ProfileArguments
     $null = Wait-IncipitHttp -Uri "http://127.0.0.1:$webPort/"
 }
 

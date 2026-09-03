@@ -13,24 +13,24 @@ if TYPE_CHECKING:
 
 
 class Phase(Enum):
-    PRE_PIPELINE  = "pre_pipeline"
-    PRE_STAGE     = "pre_stage"
-    POST_STAGE    = "post_stage"
+    PRE_PIPELINE = "pre_pipeline"
+    PRE_STAGE = "pre_stage"
+    POST_STAGE = "post_stage"
     POST_PIPELINE = "post_pipeline"
-    ON_ERROR      = "on_error"
+    ON_ERROR = "on_error"
 
 
 class HookResult(Enum):
-    CONTINUE   = "continue"    # 继续执行
+    CONTINUE = "continue"  # 继续执行
     SKIP_STAGE = "skip_stage"  # 跳过当前 Stage（幂等：已处理过）
-    ABORT      = "abort"       # 终止整条 Pipeline（超配额等）
+    ABORT = "abort"  # 终止整条 Pipeline（超配额等）
 
 
 @dataclass
 class HookEvent:
     phase: Phase
     ctx: ProcessingContext
-    stage: "BaseStage | None" = None
+    stage: BaseStage | None = None
     error: Exception | None = None
     payload: object | None = None  # POST_STAGE 时为该 Stage 的输出，其余 Phase 为 None
 
@@ -51,8 +51,7 @@ class BaseHook(ABC):
     priority: ClassVar[int] = 100
 
     @abstractmethod
-    async def handle(self, event: HookEvent) -> HookResult:
-        ...
+    async def handle(self, event: HookEvent) -> HookResult: ...
 
 
 class HookRunner:
@@ -65,7 +64,7 @@ class HookRunner:
         self,
         phase: Phase,
         ctx: ProcessingContext,
-        stage: "BaseStage | None" = None,
+        stage: BaseStage | None = None,
         error: Exception | None = None,
         payload: object | None = None,
     ) -> HookResult:
@@ -76,9 +75,7 @@ class HookRunner:
                 continue
             result = await hook.handle(event)
             if result == HookResult.ABORT:
-                raise PipelineAbortedError(
-                    f"Pipeline aborted by {hook.__class__.__name__}"
-                )
+                raise PipelineAbortedError(f"Pipeline aborted by {hook.__class__.__name__}")
             if result == HookResult.SKIP_STAGE:
                 return HookResult.SKIP_STAGE
         return HookResult.CONTINUE

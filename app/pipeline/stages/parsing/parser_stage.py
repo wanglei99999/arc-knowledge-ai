@@ -26,8 +26,8 @@ class ParserStage(BaseStage[RawFile, ParsedDocument]):
     def _get_provider(self, ctx: ProcessingContext) -> ParserProvider:
         if self._provider is not None:
             return self._provider
-        # 从租户配置读 provider_id，默认 mineru_parser
-        provider_id = getattr(ctx.config, "parser_provider", "mineru_parser")
+        # 核心运行时使用镜像内置解析器；MinerU/OCR 仅在显式启用时选择。
+        provider_id = getattr(ctx.config, "parser_provider", "unstructured_parser")
         return registry.get_provider(provider_id)  # type: ignore[return-value]
 
     async def _execute(

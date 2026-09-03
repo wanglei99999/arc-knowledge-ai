@@ -20,7 +20,7 @@ class BaseStage(ABC, Generic[TInput, TOutput]):
     - execute() 由框架调用，负责前置检查和 Hook 注入点
     """
 
-    name: ClassVar[str]          # 子类必须声明，用于注册和日志
+    name: ClassVar[str]  # 子类必须声明，用于注册和日志
     version: ClassVar[str] = "1.0"
 
     # 前置条件：context.metadata 里必须有这些 key，才能执行本 Stage
@@ -45,9 +45,7 @@ class BaseStage(ABC, Generic[TInput, TOutput]):
     def _check_preconditions(self, ctx: ProcessingContext) -> None:
         missing = self.requires - ctx.metadata.keys()
         if missing:
-            raise PreconditionError(
-                f"Stage '{self.name}' requires context keys: {missing}"
-            )
+            raise PreconditionError(f"Stage '{self.name}' requires context keys: {missing}")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r}, v={self.version})"

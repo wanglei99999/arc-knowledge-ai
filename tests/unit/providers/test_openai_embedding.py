@@ -16,9 +16,7 @@ class _FakeEmbeddings:
 
     async def create(self, **kwargs: Any) -> SimpleNamespace:
         self.last_request = kwargs
-        return SimpleNamespace(
-            data=[SimpleNamespace(index=0, embedding=[0.25, 0.75])]
-        )
+        return SimpleNamespace(data=[SimpleNamespace(index=0, embedding=[0.25, 0.75])])
 
 
 class _FakeOpenAIClient:

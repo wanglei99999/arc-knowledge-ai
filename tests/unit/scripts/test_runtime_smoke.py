@@ -73,7 +73,7 @@ def smoke_config() -> SmokeConfig:
         api_base_url="http://api:8000",
         web_base_url="http://web",
         tenant_id="r0-smoke",
-        email="r0-smoke@local.invalid",
+        email="r0-smoke@example.com",
         password="never-print-this-password",
         timeout_seconds=5,
     )
@@ -159,8 +159,8 @@ async def test_run_l1_executes_business_flow_and_cleans_only_created_resources()
             return httpx.Response(409, json={"detail": "already registered"})
         if request.url.path == "/auth/login":
             return httpx.Response(200, json={"access_token": "token"})
+        assert request.headers["authorization"] == "Bearer token"
         if request.url.path == "/spaces" and request.method == "POST":
-            assert request.headers["authorization"] == "Bearer token"
             return httpx.Response(201, json={"space_id": "space-1"})
         if request.url.path == "/documents/upload":
             assert request.url.params["space_id"] == "space-1"

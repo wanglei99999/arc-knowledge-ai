@@ -17,11 +17,10 @@ COPY --from=uv /uv /uvx /bin/
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-COPY app ./app
-COPY scripts ./scripts
-COPY tests/fixtures ./tests/fixtures
-RUN uv sync --frozen --no-dev \
-    && chown -R app:app /app
+COPY --chown=app:app app ./app
+COPY --chown=app:app scripts ./scripts
+COPY --chown=app:app tests/fixtures ./tests/fixtures
+RUN uv sync --frozen --no-dev
 
 USER app
 EXPOSE 8000

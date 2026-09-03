@@ -41,11 +41,14 @@ class TenantConfigRepository:
             RETURNING *
         """)
         async with get_session() as session:
-            result = await session.execute(sql, {
-                "tenant_id": tenant_id,
-                "provider":  default_llm_provider,
-                "model":     default_llm_model,
-                "allowed":   json.dumps(allowed_models),
-            })
+            result = await session.execute(
+                sql,
+                {
+                    "tenant_id": tenant_id,
+                    "provider": default_llm_provider,
+                    "model": default_llm_model,
+                    "allowed": json.dumps(allowed_models),
+                },
+            )
             row = result.fetchone()
             return dict(row._mapping)

@@ -17,6 +17,7 @@ _bearer = HTTPBearer(auto_error=False)
 @dataclass
 class UserContext:
     """JWT 解析后的用户身份（tenant_id + user_id）"""
+
     tenant_id: str
     user_id: str
 
@@ -111,7 +112,7 @@ async def require_user(
             )
 
         tenant_id = payload.get("tenant_id")
-        user_id   = payload.get("sub")
+        user_id = payload.get("sub")
         if not tenant_id or not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

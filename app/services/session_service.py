@@ -70,47 +70,37 @@ class SessionService:
     ) -> Session:
         return await self._session_repo.create(tenant_id, user_id, title, space_id)
 
-    async def get(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def get(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         return await self._session_repo.get_by_id(session_id, tenant_id, user_id)
 
     async def list(
-        self, tenant_id: str, user_id: str, limit: int = 20, offset: int = 0,
+        self,
+        tenant_id: str,
+        user_id: str,
+        limit: int = 20,
+        offset: int = 0,
         space_id: str | None = None,
     ) -> SessionListResult:
         sessions = await self._session_repo.list(tenant_id, user_id, limit, offset, space_id)
         return SessionListResult(sessions=sessions, total=len(sessions))
 
-    async def delete(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
+    async def delete(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         """删除会话及其关联记忆"""
         deleted = await self._session_repo.delete(session_id, tenant_id, user_id)
         if deleted:
             await self._memory_repo.delete_by_session(session_id)
         return deleted
 
-    async def archive(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
-        owned = await self._session_repo.get_by_id(
-            session_id, tenant_id, user_id
-        )
+    async def archive(self, session_id: str, tenant_id: str, user_id: str) -> bool:
+        owned = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
         if owned is None:
             return False
-        if await self._attachment_repo.has_active_turn(
-            session_id, tenant_id, user_id
-        ):
+        if await self._attachment_repo.has_active_turn(session_id, tenant_id, user_id):
             raise SessionBusyError
         return await self._session_repo.archive(session_id, tenant_id, user_id)
 
-    async def restore(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> bool:
-        owned = await self._session_repo.get_by_id(
-            session_id, tenant_id, user_id
-        )
+    async def restore(self, session_id: str, tenant_id: str, user_id: str) -> bool:
+        owned = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
         if owned is None:
             return False
         space = (
@@ -122,14 +112,10 @@ class SessionService:
             raise SessionSpaceArchivedError
         return await self._session_repo.restore(session_id, tenant_id, user_id)
 
-    async def pin(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def pin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         return await self._session_repo.pin(session_id, tenant_id, user_id)
 
-    async def unpin(
-        self, session_id: str, tenant_id: str, user_id: str
-    ) -> Session | None:
+    async def unpin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
         return await self._session_repo.unpin(session_id, tenant_id, user_id)
 
     async def rename(
@@ -139,9 +125,7 @@ class SessionService:
         user_id: str,
         title: str,
     ) -> Session | None:
-        return await self._session_repo.rename(
-            session_id, tenant_id, user_id, title
-        )
+        return await self._session_repo.rename(session_id, tenant_id, user_id, title)
 
     async def list_archived(
         self,
@@ -169,9 +153,7 @@ class SessionService:
             session_id, tenant_id, user_id, n=limit
         )
         message_ids = [message.message_id for message in messages]
-        assistant_ids = [
-            message.message_id for message in messages if message.role == "assistant"
-        ]
+        assistant_ids = [message.message_id for message in messages if message.role == "assistant"]
         citations_map, attachments_map = await asyncio.gather(
             self._citation_repo.get_by_message_ids(assistant_ids, tenant_id),
             self._attachment_repo.get_by_message_ids(message_ids, tenant_id),
@@ -185,9 +167,7 @@ class SessionService:
                 processing_error=message.processing_error,
                 attachments=attachments_map.get(message.message_id, []),
                 citations=(
-                    citations_map.get(message.message_id, [])
-                    if message.role == "assistant"
-                    else []
+                    citations_map.get(message.message_id, []) if message.role == "assistant" else []
                 ),
             )
             for message in messages

@@ -102,8 +102,11 @@ async def list_sessions(
     user: UserContext = Depends(require_user),
 ) -> list[SessionOut]:
     result = await _service.list(
-        tenant_id=user.tenant_id, user_id=user.user_id,
-        limit=limit, offset=offset, space_id=space_id,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        limit=limit,
+        offset=offset,
+        space_id=space_id,
     )
     return [
         SessionOut(
@@ -181,9 +184,7 @@ async def rename_session(
     body: RenameSessionBody,
     user: UserContext = Depends(require_user),
 ) -> SessionOut:
-    renamed = await _service.rename(
-        session_id, user.tenant_id, user.user_id, body.title
-    )
+    renamed = await _service.rename(session_id, user.tenant_id, user.user_id, body.title)
     if not renamed:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -217,9 +218,7 @@ async def archive_session(
     user: UserContext = Depends(require_user),
 ) -> None:
     try:
-        archived = await _service.archive(
-            session_id, user.tenant_id, user.user_id
-        )
+        archived = await _service.archive(session_id, user.tenant_id, user.user_id)
     except SessionBusyError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -241,9 +240,7 @@ async def restore_session(
     user: UserContext = Depends(require_user),
 ) -> None:
     try:
-        restored = await _service.restore(
-            session_id, user.tenant_id, user.user_id
-        )
+        restored = await _service.restore(session_id, user.tenant_id, user.user_id)
     except SessionSpaceArchivedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -287,9 +284,7 @@ async def unpin_session(
     session_id: str,
     user: UserContext = Depends(require_user),
 ) -> SessionOut:
-    unpinned = await _service.unpin(
-        session_id, user.tenant_id, user.user_id
-    )
+    unpinned = await _service.unpin(session_id, user.tenant_id, user.user_id)
     if not unpinned:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

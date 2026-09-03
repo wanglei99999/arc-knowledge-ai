@@ -33,7 +33,8 @@ class AnswerRepository:
     ) -> Message:
         message_id = str(uuid.uuid4())
         async with get_db() as db:
-            message_result = await db.execute(text("""
+            message_result = await db.execute(
+                text("""
                 INSERT INTO messages (
                     message_id, session_id, tenant_id, user_id,
                     role, content, token_count
@@ -46,21 +47,24 @@ class AnswerRepository:
                   AND s.user_id = :user_id
                 RETURNING message_id, session_id, tenant_id, user_id,
                           role, content, token_count, created_at
-            """), {
-                "message_id": message_id,
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "role": "assistant",
-                "content": content,
-                "token_count": 0,
-            })
+            """),
+                {
+                    "message_id": message_id,
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "role": "assistant",
+                    "content": content,
+                    "token_count": 0,
+                },
+            )
             message_row = message_result.one_or_none()
             if message_row is None:
                 raise ValueError("会话不存在或无权访问")
 
             if citations:
-                await db.execute(text("""
+                await db.execute(
+                    text("""
                     INSERT INTO message_citations (
                         id, message_id, tenant_id, space_id,
                         document_id, chunk_id, rank, score,
@@ -71,40 +75,46 @@ class AnswerRepository:
                         :document_id, :chunk_id, :rank, :score,
                         :retrieval_mode, :content_snapshot, :title_snapshot
                     )
-                """), [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "message_id": message_id,
-                        "tenant_id": tenant_id,
-                        "space_id": _optional_uuid(space_id),
-                        "document_id": _optional_uuid(item.get("doc_id")),
-                        "chunk_id": _optional_uuid(item.get("chunk_id")),
-                        "rank": index + 1,
-                        "score": item.get("score"),
-                        "retrieval_mode": item.get("source", "unknown"),
-                        "content_snapshot": item.get("content", ""),
-                        "title_snapshot": item.get("doc_name"),
-                    }
-                    for index, item in enumerate(citations)
-                ])
+                """),
+                    [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "message_id": message_id,
+                            "tenant_id": tenant_id,
+                            "space_id": _optional_uuid(space_id),
+                            "document_id": _optional_uuid(item.get("doc_id")),
+                            "chunk_id": _optional_uuid(item.get("chunk_id")),
+                            "rank": index + 1,
+                            "score": item.get("score"),
+                            "retrieval_mode": item.get("source", "unknown"),
+                            "content_snapshot": item.get("content", ""),
+                            "title_snapshot": item.get("doc_name"),
+                        }
+                        for index, item in enumerate(citations)
+                    ],
+                )
 
-            session_result = await db.execute(text("""
+            session_result = await db.execute(
+                text("""
                 UPDATE sessions
                 SET message_count = message_count + 1, updated_at = NOW()
                 WHERE session_id = :session_id
                   AND tenant_id = :tenant_id
                   AND user_id = :user_id
                 RETURNING session_id
-            """), {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            """),
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             if session_result.one_or_none() is None:
                 raise RuntimeError("会话消息计数更新失败")
 
             if source_turn_id is not None:
-                completed_result = await db.execute(text("""
+                completed_result = await db.execute(
+                    text("""
                     UPDATE messages AS m
                     SET processing_status = 'completed', processing_error = NULL
                     FROM sessions AS s
@@ -118,12 +128,14 @@ class AnswerRepository:
                       AND s.user_id = :user_id
                       AND m.processing_status = 'answering'
                     RETURNING m.message_id
-                """), {
-                    "source_turn_id": source_turn_id,
-                    "session_id": session_id,
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                })
+                """),
+                    {
+                        "source_turn_id": source_turn_id,
+                        "session_id": session_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                    },
+                )
                 if completed_result.one_or_none() is None:
                     raise RuntimeError("聊天轮次完成状态更新失败")
 

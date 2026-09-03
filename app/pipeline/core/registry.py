@@ -26,9 +26,9 @@ class ComponentRegistry:
         class PDFParserStage(BaseStage): ...
     """
 
-    _instance: "ComponentRegistry | None" = None
+    _instance: ComponentRegistry | None = None
 
-    def __new__(cls) -> "ComponentRegistry":
+    def __new__(cls) -> ComponentRegistry:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._stages: dict[str, type[Any]] = {}
@@ -40,43 +40,55 @@ class ComponentRegistry:
 
     def stage(self, name: str):
         """装饰器：注册 Stage 实现类"""
+
         def decorator(cls: type) -> type:
             cls.name = name
             self._stages[name] = cls
             return cls
+
         return decorator
 
     def provider(self, provider_id: str):
         """装饰器：注册 Provider 实现类"""
+
         def decorator(cls: type) -> type:
             cls.provider_id = provider_id
             self._providers[provider_id] = cls
             return cls
+
         return decorator
 
     def strategy(self, strategy_id: str):
         """装饰器：注册 Strategy 实现类"""
+
         def decorator(cls: type) -> type:
             cls.strategy_id = strategy_id
             self._strategies[strategy_id] = cls
             return cls
+
         return decorator
 
     # ── 获取（按名字查找，实例化返回）────────────────────────────────────────
 
-    def get_stage(self, name: str) -> "BaseStage":
+    def get_stage(self, name: str) -> BaseStage:
         if name not in self._stages:
-            raise StageNotFoundError(f"Stage '{name}' not registered. Available: {list(self._stages)}")
+            raise StageNotFoundError(
+                f"Stage '{name}' not registered. Available: {list(self._stages)}"
+            )
         return self._stages[name]()
 
-    def get_provider(self, provider_id: str) -> "BaseProvider":
+    def get_provider(self, provider_id: str) -> BaseProvider:
         if provider_id not in self._providers:
-            raise ProviderNotFoundError(f"Provider '{provider_id}' not registered. Available: {list(self._providers)}")
+            raise ProviderNotFoundError(
+                f"Provider '{provider_id}' not registered. Available: {list(self._providers)}"
+            )
         return self._providers[provider_id]()
 
-    def get_strategy(self, strategy_id: str) -> "BaseStrategy":
+    def get_strategy(self, strategy_id: str) -> BaseStrategy:
         if strategy_id not in self._strategies:
-            raise StrategyNotFoundError(f"Strategy '{strategy_id}' not registered. Available: {list(self._strategies)}")
+            raise StrategyNotFoundError(
+                f"Strategy '{strategy_id}' not registered. Available: {list(self._strategies)}"
+            )
         return self._strategies[strategy_id]()
 
     # ── 调试 ─────────────────────────────────────────────────────────────────
