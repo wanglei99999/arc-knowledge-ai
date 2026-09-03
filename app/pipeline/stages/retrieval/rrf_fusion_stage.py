@@ -48,13 +48,15 @@ class RRFFusionStage(BaseStage[SearchContext, SearchContext]):
         ranked_hits: list[SearchHit] = []
         for rank, chunk_id in enumerate(sorted_ids, start=1):
             hit = hit_map[chunk_id]
-            ranked_hits.append(SearchHit(
-                chunk_id=hit.chunk_id,
-                document_id=hit.document_id,
-                chunk_index=hit.chunk_index,
-                score=rrf_scores[chunk_id],
-                source=hit.source,
-                rank=rank,
-            ))
+            ranked_hits.append(
+                SearchHit(
+                    chunk_id=hit.chunk_id,
+                    document_id=hit.document_id,
+                    chunk_index=hit.chunk_index,
+                    score=rrf_scores[chunk_id],
+                    source=hit.source,
+                    rank=rank,
+                )
+            )
 
         return replace(search_ctx, ranked_hits=ranked_hits)

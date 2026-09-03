@@ -5,7 +5,6 @@ from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
 
 
 class SpaceService:
-
     def __init__(self, repo: SpaceRepository | None = None) -> None:
         self._repo = repo or SpaceRepository()
 

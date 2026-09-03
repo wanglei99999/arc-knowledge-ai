@@ -36,9 +36,9 @@ class MinerUParserProvider(ParserProvider):
         "image/tiff",
         "image/bmp",
         "image/webp",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",   # docx
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation", # pptx
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",         # xlsx
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # docx
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # pptx
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # xlsx
     }
 
     def __init__(self) -> None:
@@ -88,7 +88,9 @@ class MinerUParserProvider(ParserProvider):
                         if attempt < max_attempts - 1:
                             logger.warning(
                                 "MinerU busy (409), waiting %ds before retry %d/%d",
-                                retry_interval, attempt + 1, max_attempts,
+                                retry_interval,
+                                attempt + 1,
+                                max_attempts,
                             )
                             await asyncio.sleep(retry_interval)
                             continue

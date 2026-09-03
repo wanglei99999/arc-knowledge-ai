@@ -291,23 +291,19 @@ arc-knowledge-ai/
 
 ## 快速启动
 
-```bash
-# 1. 启动所有依赖（PostgreSQL / MinIO / Milvus / ES / Redis / Temporal）
-docker-compose up -d
-
-# 2. 建表
-python scripts/migrate.py
-
-# 3. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY
-
-# 4. 启动 FastAPI
-uvicorn app.main:app --reload
-
-# 5. 启动 Temporal Worker（另一个终端）
-python scripts/start_worker.py
+```powershell
+Copy-Item .env.example .env
+./incipit.ps1 doctor
+./incipit.ps1 start
+./incipit.ps1 smoke -Level L1
 ```
+
+- Web：`http://127.0.0.1:3300`
+- API 文档：`http://127.0.0.1:8000/docs`
+- Temporal UI：`http://127.0.0.1:8233`
+
+启动前请按本机模型配置修改 `.env`。状态含义、完整启动、日志和故障恢复见
+[本地运行运维手册](./docs/operations/local-runtime.md)。
 
 ---
 

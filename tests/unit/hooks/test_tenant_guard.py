@@ -1,4 +1,5 @@
 """TenantGuard 单元测试"""
+
 import pytest
 
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
@@ -8,8 +9,12 @@ from app.pipeline.hooks.tenant_guard import TenantGuard
 
 def _make_ctx(tenant_id: str) -> ProcessingContext:
     quota = QuotaSnapshot(
-        max_documents=100, max_storage_bytes=1024, max_api_calls_per_day=1000,
-        used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+        max_documents=100,
+        max_storage_bytes=1024,
+        max_api_calls_per_day=1000,
+        used_documents=0,
+        used_storage_bytes=0,
+        used_api_calls_today=0,
     )
     return ProcessingContext.create(
         tenant_id=tenant_id,

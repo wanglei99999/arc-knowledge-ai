@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import replace
 
-from app.domain.retrieval import RetrievalQuery, SearchContext
+from app.domain.retrieval import SearchContext
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
 from app.pipeline.core.stage import BaseStage
@@ -53,6 +53,7 @@ class QueryRewriteStage(BaseStage[SearchContext, SearchContext]):
         if self._provider is not None:
             return self._provider
         from app.providers.llm.model_hub import model_hub
+
         return model_hub.get_provider(ctx)
 
     async def _execute(
@@ -72,8 +73,7 @@ class QueryRewriteStage(BaseStage[SearchContext, SearchContext]):
 
             is_valid: bool = bool(parsed.get("is_knowledge_query", True))
             expanded: list[str] = [
-                q for q in parsed.get("expanded_queries", [])
-                if isinstance(q, str) and q.strip()
+                q for q in parsed.get("expanded_queries", []) if isinstance(q, str) and q.strip()
             ]
 
             new_query = replace(

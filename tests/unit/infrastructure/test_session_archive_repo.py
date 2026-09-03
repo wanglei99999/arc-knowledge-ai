@@ -107,9 +107,7 @@ async def test_session_lookup_maps_archive_and_pin_timestamps(monkeypatch) -> No
     db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    session = await SessionRepository().get_by_id(
-        "session-1", "tenant-1", "user-1"
-    )
+    session = await SessionRepository().get_by_id("session-1", "tenant-1", "user-1")
 
     assert session is not None
     assert session.archived_at == archived_at
@@ -121,9 +119,7 @@ async def test_archive_is_owned_idempotent_and_clears_pin(monkeypatch) -> None:
     db = _FakeDB([_Result(rowcount=1)])
     _patch_session(monkeypatch, db)
 
-    changed = await SessionRepository().archive(
-        "session-1", "tenant-1", "user-1"
-    )
+    changed = await SessionRepository().archive("session-1", "tenant-1", "user-1")
 
     assert changed is True
     sql, params = db.calls[0]
@@ -143,9 +139,7 @@ async def test_restore_is_owned_and_idempotent(monkeypatch) -> None:
     db = _FakeDB([_Result(rowcount=1)])
     _patch_session(monkeypatch, db)
 
-    changed = await SessionRepository().restore(
-        "session-1", "tenant-1", "user-1"
-    )
+    changed = await SessionRepository().restore("session-1", "tenant-1", "user-1")
 
     assert changed is True
     sql, params = db.calls[0]
@@ -178,9 +172,7 @@ async def test_pin_is_owned_idempotent_and_active_only(monkeypatch) -> None:
     db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    pinned = await SessionRepository().pin(
-        "session-1", "tenant-1", "user-1"
-    )
+    pinned = await SessionRepository().pin("session-1", "tenant-1", "user-1")
 
     assert pinned is not None
     assert pinned.pinned_at == pinned_at
@@ -213,9 +205,7 @@ async def test_unpin_is_owned_and_idempotent(monkeypatch) -> None:
     db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    unpinned = await SessionRepository().unpin(
-        "session-1", "tenant-1", "user-1"
-    )
+    unpinned = await SessionRepository().unpin("session-1", "tenant-1", "user-1")
 
     assert unpinned is not None
     assert unpinned.pinned_at is None
@@ -249,9 +239,7 @@ async def test_rename_updates_only_an_owned_active_session_without_reordering(mo
     db = _FakeDB([_Result(row=session_row)])
     _patch_session(monkeypatch, db)
 
-    renamed = await SessionRepository().rename(
-        "session-1", "tenant-1", "user-1", "新的标题"
-    )
+    renamed = await SessionRepository().rename("session-1", "tenant-1", "user-1", "新的标题")
 
     assert renamed is not None
     assert renamed.title == "新的标题"
@@ -283,10 +271,12 @@ async def test_archived_query_joins_space_counts_and_maps_rows(monkeypatch) -> N
         message_count=2,
         archived_at=archived_at,
     )
-    db = _FakeDB([
-        _Result(scalar=1),
-        _Result(rows=[archived_row]),
-    ])
+    db = _FakeDB(
+        [
+            _Result(scalar=1),
+            _Result(rows=[archived_row]),
+        ]
+    )
     _patch_session(monkeypatch, db)
 
     items, total = await SessionRepository().list_archived(

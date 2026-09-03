@@ -54,10 +54,10 @@ class InfinityRerankProvider(RerankProvider):
             resp = await client.post(
                 f"{self._base_url}/rerank",
                 json={
-                    "model":     self._model,
-                    "query":     query,
+                    "model": self._model,
+                    "query": query,
                     "documents": documents,
-                    "top_n":     top_n,
+                    "top_n": top_n,
                 },
             )
             resp.raise_for_status()

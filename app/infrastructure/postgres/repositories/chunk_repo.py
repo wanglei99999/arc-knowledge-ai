@@ -11,10 +11,7 @@ from app.infrastructure.postgres.client import get_session
 
 def _row_to_dict(row) -> dict:
     """将数据库行转为 dict，UUID 对象统一转为 str。"""
-    return {
-        k: str(v) if isinstance(v, uuid.UUID) else v
-        for k, v in dict(row._mapping).items()
-    }
+    return {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in dict(row._mapping).items()}
 
 
 class ChunkRepository:
@@ -40,19 +37,23 @@ class ChunkRepository:
             INSERT INTO documents
                 (id, tenant_id, space_id, original_name, mime_type, file_path, file_size, status)
             VALUES
-                (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path, :file_size, 'pending')
+                (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path,
+                 :file_size, 'pending')
             ON CONFLICT (id) DO NOTHING
         """)
         async with get_session() as session:
-            await session.execute(sql, {
-                "id": document_id,
-                "tenant_id": tenant_id,
-                "space_id": space_id,
-                "original_name": original_name,
-                "mime_type": mime_type,
-                "file_path": file_path,
-                "file_size": file_size,
-            })
+            await session.execute(
+                sql,
+                {
+                    "id": document_id,
+                    "tenant_id": tenant_id,
+                    "space_id": space_id,
+                    "original_name": original_name,
+                    "mime_type": mime_type,
+                    "file_path": file_path,
+                    "file_size": file_size,
+                },
+            )
 
     async def save_chunks(self, chunks: list[DocumentChunk]) -> None:
         """批量 upsert chunks（按 chunk_id 冲突时更新）"""
@@ -106,11 +107,14 @@ class ChunkRepository:
               AND tenant_id = :tenant_id
         """)
         async with get_session() as session:
-            await session.execute(sql, {
-                "count": count,
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            await session.execute(
+                sql,
+                {
+                    "count": count,
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                },
+            )
 
     async def update_document_status(
         self,
@@ -144,7 +148,6 @@ class ChunkRepository:
         async with get_session() as session:
             await session.execute(sql, params)
 
-
     async def get_chunks_by_ids(
         self,
         chunk_ids: list[str],
@@ -163,10 +166,13 @@ class ChunkRepository:
             ORDER BY dc.chunk_index
         """)
         async with get_session() as session:
-            result = await session.execute(sql, {
-                "chunk_ids": chunk_ids,
-                "tenant_id": tenant_id,
-            })
+            result = await session.execute(
+                sql,
+                {
+                    "chunk_ids": chunk_ids,
+                    "tenant_id": tenant_id,
+                },
+            )
             return [_row_to_dict(row) for row in result]
 
     async def get_chunks_by_document(
@@ -182,10 +188,13 @@ class ChunkRepository:
             ORDER BY chunk_index
         """)
         async with get_session() as session:
-            result = await session.execute(sql, {
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            result = await session.execute(
+                sql,
+                {
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                },
+            )
             return [_row_to_dict(row) for row in result]
 
     async def get_document_meta(
@@ -202,10 +211,13 @@ class ChunkRepository:
               AND tenant_id  = :tenant_id
         """)
         async with get_session() as session:
-            result = await session.execute(sql, {
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            result = await session.execute(
+                sql,
+                {
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                },
+            )
             row = result.one_or_none()
             return _row_to_dict(row) if row else None
 
@@ -227,10 +239,13 @@ class ChunkRepository:
             RETURNING id
         """)
         async with get_session() as session:
-            result = await session.execute(sql, {
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            result = await session.execute(
+                sql,
+                {
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                },
+            )
             return result.one_or_none() is not None
 
     async def list_documents(
@@ -287,7 +302,10 @@ class ChunkRepository:
               AND tenant_id   = :tenant_id
         """)
         async with get_session() as session:
-            await session.execute(sql, {
-                "document_id": document_id,
-                "tenant_id": tenant_id,
-            })
+            await session.execute(
+                sql,
+                {
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                },
+            )

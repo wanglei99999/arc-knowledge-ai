@@ -12,17 +12,22 @@ async def test_chat_turn_flow_recovers_attachments_answer_and_citations(
     client = chat_turn_test_app.client
     backend = chat_turn_test_app.backend
 
-    created = await client.post("/chat/turns", json={
-        "client_request_id": "request-1",
-        "session_id": "session-1",
-        "query": "合同金额是多少？",
-        "attachments": [{
-            "client_id": "client-1",
-            "file_name": "contract.pdf",
-            "mime_type": "application/pdf",
-            "file_size": 8,
-        }],
-    })
+    created = await client.post(
+        "/chat/turns",
+        json={
+            "client_request_id": "request-1",
+            "session_id": "session-1",
+            "query": "合同金额是多少？",
+            "attachments": [
+                {
+                    "client_id": "client-1",
+                    "file_name": "contract.pdf",
+                    "mime_type": "application/pdf",
+                    "file_size": 8,
+                }
+            ],
+        },
+    )
     assert created.status_code == 201
     assert created.json()["attachments"][0]["status"] == "pending_upload"
 

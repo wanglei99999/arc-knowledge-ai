@@ -105,11 +105,13 @@ def _hydration_results(*attachments) -> list[_Result]:
 
 @pytest.mark.asyncio
 async def test_create_turn_reuses_client_request_id(monkeypatch) -> None:
-    db = _FakeDB([
-        _Result(row=_row(session_id="session-1")),
-        _Result(row=_row(message_id="turn-1")),
-        *_hydration_results(_attachment_row()),
-    ])
+    db = _FakeDB(
+        [
+            _Result(row=_row(session_id="session-1")),
+            _Result(row=_row(message_id="turn-1")),
+            *_hydration_results(_attachment_row()),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     turn = await ChatTurnRepository().create_turn(
@@ -119,9 +121,7 @@ async def test_create_turn_reuses_client_request_id(monkeypatch) -> None:
         user_id="user-1",
         space_id="space-1",
         query="总结附件",
-        attachments=[
-            AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 1024)
-        ],
+        attachments=[AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 1024)],
     )
 
     assert turn.turn_id == "turn-1"
@@ -136,14 +136,16 @@ async def test_create_turn_reuses_client_request_id(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_create_turn_inserts_message_and_placeholders_in_one_session(monkeypatch) -> None:
-    db = _FakeDB([
-        _Result(row=_row(session_id="session-1")),
-        _Result(row=None),
-        _Result(),
-        _Result(),
-        _Result(),
-        *_hydration_results(_attachment_row()),
-    ])
+    db = _FakeDB(
+        [
+            _Result(row=_row(session_id="session-1")),
+            _Result(row=None),
+            _Result(),
+            _Result(),
+            _Result(),
+            *_hydration_results(_attachment_row()),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     turn = await ChatTurnRepository().create_turn(
@@ -153,18 +155,14 @@ async def test_create_turn_inserts_message_and_placeholders_in_one_session(monke
         user_id="user-1",
         space_id="space-1",
         query="总结附件",
-        attachments=[
-            AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 1024)
-        ],
+        attachments=[AttachmentDeclaration("client-1", "contract.pdf", "application/pdf", 1024)],
     )
 
     assert turn.processing_status.value == "waiting_files"
     assert db.context_entries == 1
     message_call = next(call for call in db.calls if "insert into messages" in call[0])
     attachment_call = next(
-        call
-        for call in db.calls
-        if "insert into message_attachments" in call[0]
+        call for call in db.calls if "insert into message_attachments" in call[0]
     )
     assert message_call[1]["client_request_id"] == "request-1"
     assert message_call[1]["processing_status"] == "waiting_files"
@@ -196,27 +194,29 @@ async def test_get_turn_rejects_other_tenant_or_user(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_get_turn_maps_upload_and_document_states(monkeypatch) -> None:
-    db = _FakeDB(_hydration_results(
-        _attachment_row(),
-        _attachment_row(
-            attachment_id="attachment-2",
-            client_id="client-2",
-            document_id="document-2",
-            upload_status="uploaded",
-            document_status="indexed",
-        ),
-        _attachment_row(
-            attachment_id="attachment-3",
-            client_id="client-3",
-            upload_status="failed",
-            upload_error="上传中断",
-        ),
-        _attachment_row(
-            attachment_id="attachment-4",
-            client_id="client-4",
-            ignored=True,
-        ),
-    ))
+    db = _FakeDB(
+        _hydration_results(
+            _attachment_row(),
+            _attachment_row(
+                attachment_id="attachment-2",
+                client_id="client-2",
+                document_id="document-2",
+                upload_status="uploaded",
+                document_status="indexed",
+            ),
+            _attachment_row(
+                attachment_id="attachment-3",
+                client_id="client-3",
+                upload_status="failed",
+                upload_error="上传中断",
+            ),
+            _attachment_row(
+                attachment_id="attachment-4",
+                client_id="client-4",
+                ignored=True,
+            ),
+        )
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     turn = await ChatTurnRepository().get_turn(
@@ -320,21 +320,21 @@ async def test_set_ignored_updates_only_owned_attachment(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_add_attachment_locks_owned_turn_and_enforces_limit(monkeypatch) -> None:
-    db = _FakeDB([
-        _Result(row=_row(message_id="turn-1", space_id="space-1")),
-        _Result(row=None),
-        _Result(row=_row(attachment_count=4)),
-        _Result(row=_row(attachment_id="attachment-5")),
-    ])
+    db = _FakeDB(
+        [
+            _Result(row=_row(message_id="turn-1", space_id="space-1")),
+            _Result(row=None),
+            _Result(row=_row(attachment_count=4)),
+            _Result(row=_row(attachment_id="attachment-5")),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     added = await ChatTurnRepository().add_attachment(
         turn_id="turn-1",
         tenant_id="tenant-1",
         user_id="user-1",
-        attachment=AttachmentDeclaration(
-            "client-5", "appendix.pdf", "application/pdf", 2048
-        ),
+        attachment=AttachmentDeclaration("client-5", "appendix.pdf", "application/pdf", 2048),
         max_attachments=5,
     )
 
@@ -354,10 +354,12 @@ async def test_add_attachment_locks_owned_turn_and_enforces_limit(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_claim_answer_updates_only_waiting_or_failed_turn(monkeypatch) -> None:
-    db = _FakeDB([
-        _Result(row=_row(message_id="turn-1")),
-        _Result(row=None),
-    ])
+    db = _FakeDB(
+        [
+            _Result(row=_row(message_id="turn-1")),
+            _Result(row=None),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
     repository = ChatTurnRepository()
 
@@ -381,15 +383,19 @@ async def test_claim_ready_answer_atomically_checks_readiness_and_returns_scope(
 ) -> None:
     doc1 = "11111111-1111-4111-8111-111111111111"
     doc2 = "22222222-2222-4222-8222-222222222222"
-    db = _FakeDB([
-        _Result(row=_row(
-            message_id="turn-1",
-            session_id="session-1",
-            space_id="33333333-3333-4333-8333-333333333333",
-            content="总结附件",
-        )),
-        _Result(rows=[_row(document_id=doc1), _row(document_id=doc2)]),
-    ])
+    db = _FakeDB(
+        [
+            _Result(
+                row=_row(
+                    message_id="turn-1",
+                    session_id="session-1",
+                    space_id="33333333-3333-4333-8333-333333333333",
+                    content="总结附件",
+                )
+            ),
+            _Result(rows=[_row(document_id=doc1), _row(document_id=doc2)]),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     claim = await ChatTurnRepository().claim_ready_answer(
@@ -434,15 +440,19 @@ async def test_claim_ready_answer_returns_none_when_another_request_claimed(
 
 @pytest.mark.asyncio
 async def test_claim_ready_answer_rejects_empty_scope_after_claim(monkeypatch) -> None:
-    db = _FakeDB([
-        _Result(row=_row(
-            message_id="turn-1",
-            session_id="session-1",
-            space_id="33333333-3333-4333-8333-333333333333",
-            content="总结附件",
-        )),
-        _Result(rows=[]),
-    ])
+    db = _FakeDB(
+        [
+            _Result(
+                row=_row(
+                    message_id="turn-1",
+                    session_id="session-1",
+                    space_id="33333333-3333-4333-8333-333333333333",
+                    content="总结附件",
+                )
+            ),
+            _Result(rows=[]),
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
     with pytest.raises(RuntimeError, match="文档范围"):
@@ -457,25 +467,29 @@ async def test_claim_ready_answer_rejects_empty_scope_after_claim(monkeypatch) -
 async def test_get_attachments_by_message_ids_batches_and_tenant_scopes(
     monkeypatch,
 ) -> None:
-    db = _FakeDB([_Result(rows=[
-        _attachment_row(
-            message_id="turn-1",
-            document_id="document-1",
-            upload_status="uploaded",
-            document_status="indexed",
-        ),
-        _attachment_row(
-            message_id="turn-2",
-            attachment_id="attachment-2",
-            client_id="client-2",
-            file_name="appendix.pdf",
-        ),
-    ])])
+    db = _FakeDB(
+        [
+            _Result(
+                rows=[
+                    _attachment_row(
+                        message_id="turn-1",
+                        document_id="document-1",
+                        upload_status="uploaded",
+                        document_status="indexed",
+                    ),
+                    _attachment_row(
+                        message_id="turn-2",
+                        attachment_id="attachment-2",
+                        client_id="client-2",
+                        file_name="appendix.pdf",
+                    ),
+                ]
+            )
+        ]
+    )
     _patch_session(monkeypatch, repo_module, "get_session", db)
 
-    grouped = await ChatTurnRepository().get_by_message_ids(
-        ["turn-1", "turn-2"], "tenant-1"
-    )
+    grouped = await ChatTurnRepository().get_by_message_ids(["turn-1", "turn-2"], "tenant-1")
 
     assert grouped["turn-1"][0].status is AttachmentStatus.INDEXED
     assert grouped["turn-2"][0].status is AttachmentStatus.PENDING_UPLOAD
@@ -568,22 +582,26 @@ async def test_session_message_queries_require_tenant_and_user(monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_session_lookup_returns_trusted_space_id(monkeypatch) -> None:
     created_at = datetime(2026, 8, 28, tzinfo=UTC)
-    db = _FakeDB([_Result(row=_row(
-        session_id="session-1",
-        tenant_id="tenant-1",
-        user_id="user-1",
-        space_id="space-1",
-        title=None,
-        summary=None,
-        message_count=0,
-        created_at=created_at,
-        updated_at=created_at,
-    ))])
+    db = _FakeDB(
+        [
+            _Result(
+                row=_row(
+                    session_id="session-1",
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    space_id="space-1",
+                    title=None,
+                    summary=None,
+                    message_count=0,
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+        ]
+    )
     _patch_session(monkeypatch, session_repo_module, "get_db", db)
 
-    session = await SessionRepository().get_by_id(
-        "session-1", "tenant-1", "user-1"
-    )
+    session = await SessionRepository().get_by_id("session-1", "tenant-1", "user-1")
 
     assert session is not None
     assert session.space_id == "space-1"

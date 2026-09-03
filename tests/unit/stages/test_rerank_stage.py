@@ -1,20 +1,20 @@
 """RerankStage 单元测试"""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from app.domain.retrieval import RetrievalQuery, SearchContext, SearchHit
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.stages.retrieval.rerank_stage import RerankStage
 from app.providers.base import HealthStatus, RerankProvider
 
-
 # ── Fake RerankProvider ───────────────────────────────────────────────────────
+
 
 class FakeRerankProvider(RerankProvider):
     """按文档长度倒序打分（长文档得分高），方便断言顺序变化。"""
+
     provider_id = "fake_rerank"
 
     async def health_check(self) -> HealthStatus:
@@ -28,10 +28,17 @@ class FakeRerankProvider(RerankProvider):
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-def _make_ctx(rerank_enabled: bool = True, rerank_provider: str = "fake_rerank") -> ProcessingContext:
+
+def _make_ctx(
+    rerank_enabled: bool = True, rerank_provider: str = "fake_rerank"
+) -> ProcessingContext:
     quota = QuotaSnapshot(
-        max_documents=100, max_storage_bytes=1024, max_api_calls_per_day=1000,
-        used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+        max_documents=100,
+        max_storage_bytes=1024,
+        max_api_calls_per_day=1000,
+        used_documents=0,
+        used_storage_bytes=0,
+        used_api_calls_today=0,
     )
     config = TenantConfig(
         tenant_id="test-tenant",
@@ -48,8 +55,11 @@ def _make_ctx(rerank_enabled: bool = True, rerank_provider: str = "fake_rerank")
 
 def _hit(chunk_id: str, rank: int = 1) -> SearchHit:
     return SearchHit(
-        chunk_id=chunk_id, document_id="doc-1",
-        chunk_index=rank - 1, score=1.0 / rank, rank=rank,
+        chunk_id=chunk_id,
+        document_id="doc-1",
+        chunk_index=rank - 1,
+        score=1.0 / rank,
+        rank=rank,
     )
 
 
@@ -61,6 +71,7 @@ def _search_ctx(hits: list[SearchHit], query_text: str = "test query") -> Search
 
 
 # ── rerank_enabled=False ──────────────────────────────────────────────────────
+
 
 async def test_rerank_disabled_returns_rrf_order() -> None:
     hits = [_hit("c1", 1), _hit("c2", 2), _hit("c3", 3)]
@@ -78,6 +89,7 @@ async def test_empty_hits_returns_empty() -> None:
 
 
 # ── 正常精排 ───────────────────────────────────────────────────────────────────
+
 
 async def test_rerank_reorders_hits() -> None:
     hits = [_hit("short", 1), _hit("much-longer-chunk-id", 2)]
@@ -129,6 +141,7 @@ async def test_rerank_assigns_new_scores_and_ranks() -> None:
 
 
 # ── 降级路径 ───────────────────────────────────────────────────────────────────
+
 
 async def test_provider_not_found_returns_rrf_order() -> None:
     hits = [_hit("c1", 1), _hit("c2", 2)]

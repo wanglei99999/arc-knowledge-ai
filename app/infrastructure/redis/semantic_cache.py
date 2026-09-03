@@ -60,14 +60,16 @@ _indexed_tenants: set[str] = set()
 class CacheEntry:
     answer: str
     citations: list[dict]
-    hit_type: str   # "exact" | "semantic"
+    hit_type: str  # "exact" | "semantic"
     score: float = 1.0
 
 
 def _normalize(query: str) -> str:
     query = query.strip()
-    query = re.sub(r'\s+', ' ', query) #匹配内部多个空白字符（空格、Tab、换行 \n、回车 \r）替换为 单个空白字符
-    query = query.rstrip('？?。.')
+    query = re.sub(
+        r"\s+", " ", query
+    )  # 匹配内部多个空白字符（空格、Tab、换行 \n、回车 \r）替换为 单个空白字符
+    query = query.rstrip("？?。.")
     query = query.lower()
     return query
 
@@ -78,7 +80,7 @@ def _md5(text: str) -> str:
 
 def _to_bytes(vec: list[float]) -> bytes:
     # Redis Stack HNSW 要求 FLOAT32 二进制格式；Python float 是 64 位，'f' 格式字符转为 32 位
-    return struct.pack(f'{len(vec)}f', *vec)
+    return struct.pack(f"{len(vec)}f", *vec)
 
 
 class SemanticCache:
@@ -94,12 +96,15 @@ class SemanticCache:
             return self._explicit_provider
         # 延迟 import 避免循环依赖：registry 在 main.py 启动时才完成注册
         from app.pipeline.core.registry import registry
+
         return registry.get_provider(self._provider_name)
 
     async def initialize(self) -> None:
         logger.info(
             "SemanticCache ready (enabled=%s, threshold=%.2f, ttl=%ds)",
-            self._enabled, self._threshold, self._ttl,
+            self._enabled,
+            self._threshold,
+            self._ttl,
         )
 
     async def _ensure_index(self, tenant_id: str, space_id: str = "default") -> None:
@@ -113,21 +118,35 @@ class SemanticCache:
         index_name = f"idx:cache:{tenant_id}:{space_id}"
         try:
             await redis.execute_command(
-                "FT.CREATE", index_name,
-                "ON", "HASH",
-                "PREFIX", "1", f"cache:vec:{tenant_id}:{space_id}:",
+                "FT.CREATE",
+                index_name,
+                "ON",
+                "HASH",
+                "PREFIX",
+                "1",
+                f"cache:vec:{tenant_id}:{space_id}:",
                 "SCHEMA",
-                "vector", "VECTOR", "HNSW", "10",
-                "TYPE", "FLOAT32",
-                "DIM", str(dim),
-                "DISTANCE_METRIC", "COSINE",
-                "M", "16",                  # HNSW 每节点最大边数，Redis Stack 推荐知识库场景默认值
-                "EF_CONSTRUCTION", "200",   # 构建时搜索宽度，值越大索引质量越高但写入越慢
-                "created_at", "NUMERIC",
+                "vector",
+                "VECTOR",
+                "HNSW",
+                "10",
+                "TYPE",
+                "FLOAT32",
+                "DIM",
+                str(dim),
+                "DISTANCE_METRIC",
+                "COSINE",
+                "M",
+                "16",  # HNSW 每节点最大边数，Redis Stack 推荐知识库场景默认值
+                "EF_CONSTRUCTION",
+                "200",  # 构建时搜索宽度，值越大索引质量越高但写入越慢
+                "created_at",
+                "NUMERIC",
             )
             logger.info("Created cache index for tenant %s (dim=%d)", tenant_id, dim)
         except Exception as e:
-            # 并发首请求可能同时触发 FT.CREATE，后到的会报 "Index already exists"，属于正常竞态，忽略即可
+            # 并发首请求可能同时触发 FT.CREATE，后到的会报
+            # "Index already exists"，属于正常竞态，忽略即可。
             if "Index already exists" not in str(e):
                 raise
         _indexed_tenants.add(cache_key)
@@ -162,12 +181,22 @@ class SemanticCache:
             vec_bytes = _to_bytes(embeddings[0])
 
             result = await redis.execute_command(
-                "FT.SEARCH", f"idx:cache:{tenant_id}:{space_id}",
+                "FT.SEARCH",
+                f"idx:cache:{tenant_id}:{space_id}",
                 "*=>[KNN 1 @vector $BLOB AS score]",
-                "PARAMS", "2", "BLOB", vec_bytes,
-                "RETURN", "3", "answer", "citations", "score",
-                "SORTBY", "score",
-                "DIALECT", "2",
+                "PARAMS",
+                "2",
+                "BLOB",
+                vec_bytes,
+                "RETURN",
+                "3",
+                "answer",
+                "citations",
+                "score",
+                "SORTBY",
+                "score",
+                "DIALECT",
+                "2",
             )
 
             if result and result[0] > 0:
@@ -235,12 +264,15 @@ class SemanticCache:
 
             # 每条记录用独立 uuid key，避免不同问题的向量互相覆盖，保持 HNSW 索引多样性
             vec_key = f"cache:vec:{tenant_id}:{space_id}:{uuid.uuid4()}"
-            await redis.hset(vec_key, mapping={
-                b"vector":     vec_bytes,
-                b"answer":     answer.encode(),
-                b"citations":  json.dumps(citations).encode(),
-                b"created_at": str(int(time.time())).encode(),
-            })
+            await redis.hset(
+                vec_key,
+                mapping={
+                    b"vector": vec_bytes,
+                    b"answer": answer.encode(),
+                    b"citations": json.dumps(citations).encode(),
+                    b"created_at": str(int(time.time())).encode(),
+                },
+            )
             await redis.expire(vec_key, ttl)
 
         except Exception as e:
@@ -260,9 +292,7 @@ class SemanticCache:
         # 删除精确匹配 key
         cursor = 0
         while True:
-            cursor, keys = await redis.scan(
-                cursor, match=f"cache:exact:{tenant_id}:*", count=100
-            )
+            cursor, keys = await redis.scan(cursor, match=f"cache:exact:{tenant_id}:*", count=100)
             if keys:
                 await redis.delete(*keys)
             if cursor == 0:

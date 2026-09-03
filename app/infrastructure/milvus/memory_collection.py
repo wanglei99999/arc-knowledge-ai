@@ -13,6 +13,7 @@ _F_USER_ID = "user_id"
 _F_TENANT_ID = "tenant_id"
 _F_EMBEDDING = "embedding"
 
+
 def _memory_dim() -> int:
     return settings.openai_embedding_dimensions
 
@@ -47,6 +48,7 @@ def _ensure_collection(c: MilvusClient) -> None:
 
 async def reset_memory_collection() -> int:
     """删除并重建 arc_memories collection（开发环境清盘用）。返回删除前的实体数量。"""
+
     def _reset() -> int:
         c = _client()
         count = 0

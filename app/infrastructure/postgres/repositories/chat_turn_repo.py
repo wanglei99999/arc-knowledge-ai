@@ -39,11 +39,14 @@ class ChatTurnRepository:
             )
         """)
         async with get_session() as db:
-            result = await db.execute(sql, {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            result = await db.execute(
+                sql,
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             return bool(result.scalar_one())
 
     async def create_turn(
@@ -58,7 +61,8 @@ class ChatTurnRepository:
         attachments: list[AttachmentDeclaration],
     ) -> ChatTurnView:
         async with get_session() as db:
-            session_result = await db.execute(text("""
+            session_result = await db.execute(
+                text("""
                 SELECT session_id
                 FROM sessions
                 WHERE session_id = :session_id
@@ -66,26 +70,31 @@ class ChatTurnRepository:
                   AND user_id = :user_id
                   AND space_id = :space_id
                 FOR UPDATE
-            """), {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "space_id": space_id,
-            })
+            """),
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "space_id": space_id,
+                },
+            )
             if session_result.one_or_none() is None:
                 raise ValueError("Session not found for the selected space")
 
-            existing_result = await db.execute(text("""
+            existing_result = await db.execute(
+                text("""
                 SELECT message_id
                 FROM messages
                 WHERE client_request_id = :client_request_id
                   AND tenant_id = :tenant_id
                   AND user_id = :user_id
-            """), {
-                "client_request_id": client_request_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            """),
+                {
+                    "client_request_id": client_request_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             existing = existing_result.one_or_none()
             if existing is not None:
                 turn = await self._get_turn_with_db(
@@ -99,7 +108,8 @@ class ChatTurnRepository:
                 return turn
 
             turn_id = str(uuid.uuid4())
-            await db.execute(text("""
+            await db.execute(
+                text("""
                 INSERT INTO messages (
                     message_id, session_id, tenant_id, user_id, role, content,
                     processing_status, processing_error, client_request_id
@@ -108,15 +118,17 @@ class ChatTurnRepository:
                     :message_id, :session_id, :tenant_id, :user_id, 'user', :content,
                     :processing_status, NULL, :client_request_id
                 )
-            """), {
-                "message_id": turn_id,
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "content": query,
-                "processing_status": TurnProcessingStatus.WAITING_FILES.value,
-                "client_request_id": client_request_id,
-            })
+            """),
+                {
+                    "message_id": turn_id,
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "content": query,
+                    "processing_status": TurnProcessingStatus.WAITING_FILES.value,
+                    "client_request_id": client_request_id,
+                },
+            )
 
             attachment_rows = [
                 {
@@ -132,7 +144,8 @@ class ChatTurnRepository:
                 for attachment in attachments
             ]
             if attachment_rows:
-                await db.execute(text("""
+                await db.execute(
+                    text("""
                     INSERT INTO message_attachments (
                         attachment_id, message_id, tenant_id, space_id,
                         client_id, file_name, mime_type, file_size
@@ -141,19 +154,24 @@ class ChatTurnRepository:
                         :attachment_id, :message_id, :tenant_id, :space_id,
                         :client_id, :file_name, :mime_type, :file_size
                     )
-                """), attachment_rows)
+                """),
+                    attachment_rows,
+                )
 
-            await db.execute(text("""
+            await db.execute(
+                text("""
                 UPDATE sessions
                 SET message_count = message_count + 1, updated_at = NOW()
                 WHERE session_id = :session_id
                   AND tenant_id = :tenant_id
                   AND user_id = :user_id
-            """), {
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            """),
+                {
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
 
             turn = await self._get_turn_with_db(
                 db,
@@ -189,7 +207,8 @@ class ChatTurnRepository:
         if not message_ids:
             return {}
         async with get_session() as db:
-            result = await db.execute(text("""
+            result = await db.execute(
+                text("""
                 SELECT ma.message_id, ma.attachment_id, ma.client_id,
                        ma.file_name, ma.mime_type, ma.file_size,
                        ma.document_id, ma.upload_status, ma.upload_error,
@@ -211,10 +230,12 @@ class ChatTurnRepository:
                   AND m.tenant_id = :tenant_id
                   AND s.tenant_id = :tenant_id
                 ORDER BY ma.message_id, ma.created_at, ma.attachment_id
-            """), {
-                "message_ids": message_ids,
-                "tenant_id": tenant_id,
-            })
+            """),
+                {
+                    "message_ids": message_ids,
+                    "tenant_id": tenant_id,
+                },
+            )
             rows = result.fetchall()
 
         grouped: dict[str, list[AttachmentView]] = {}
@@ -234,7 +255,8 @@ class ChatTurnRepository:
     ) -> bool:
         """在锁住本轮消息后增加附件占位，避免并发请求突破数量上限。"""
         async with get_session() as db:
-            turn_result = await db.execute(text("""
+            turn_result = await db.execute(
+                text("""
                 SELECT m.message_id, s.space_id
                 FROM messages AS m
                 JOIN sessions AS s ON s.session_id = m.session_id
@@ -245,43 +267,52 @@ class ChatTurnRepository:
                   AND s.user_id = :user_id
                   AND m.processing_status = 'waiting_files'
                 FOR UPDATE
-            """), {
-                "turn_id": turn_id,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-            })
+            """),
+                {
+                    "turn_id": turn_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
             turn_row = turn_result.one_or_none()
             if turn_row is None:
                 return False
 
-            existing_result = await db.execute(text("""
+            existing_result = await db.execute(
+                text("""
                 SELECT attachment_id
                 FROM message_attachments
                 WHERE message_id = :turn_id
                   AND tenant_id = :tenant_id
                   AND client_id = :client_id
-            """), {
-                "turn_id": turn_id,
-                "tenant_id": tenant_id,
-                "client_id": attachment.client_id,
-            })
+            """),
+                {
+                    "turn_id": turn_id,
+                    "tenant_id": tenant_id,
+                    "client_id": attachment.client_id,
+                },
+            )
             if existing_result.one_or_none() is not None:
                 return True
 
-            count_result = await db.execute(text("""
+            count_result = await db.execute(
+                text("""
                 SELECT COUNT(*) AS attachment_count
                 FROM message_attachments
                 WHERE message_id = :turn_id
                   AND tenant_id = :tenant_id
-            """), {
-                "turn_id": turn_id,
-                "tenant_id": tenant_id,
-            })
+            """),
+                {
+                    "turn_id": turn_id,
+                    "tenant_id": tenant_id,
+                },
+            )
             count_row = count_result.one()
             if int(count_row._mapping["attachment_count"]) >= max_attachments:
                 return False
 
-            result = await db.execute(text("""
+            result = await db.execute(
+                text("""
                 INSERT INTO message_attachments (
                     attachment_id, message_id, tenant_id, space_id,
                     client_id, file_name, mime_type, file_size
@@ -292,16 +323,18 @@ class ChatTurnRepository:
                 )
                 ON CONFLICT (message_id, client_id) DO NOTHING
                 RETURNING attachment_id
-            """), {
-                "attachment_id": str(uuid.uuid4()),
-                "message_id": turn_id,
-                "tenant_id": tenant_id,
-                "space_id": str(turn_row._mapping["space_id"]),
-                "client_id": attachment.client_id,
-                "file_name": attachment.file_name,
-                "mime_type": attachment.mime_type,
-                "file_size": attachment.file_size,
-            })
+            """),
+                {
+                    "attachment_id": str(uuid.uuid4()),
+                    "message_id": turn_id,
+                    "tenant_id": tenant_id,
+                    "space_id": str(turn_row._mapping["space_id"]),
+                    "client_id": attachment.client_id,
+                    "file_name": attachment.file_name,
+                    "mime_type": attachment.mime_type,
+                    "file_size": attachment.file_size,
+                },
+            )
             return result.one_or_none() is not None
 
     async def link_document(
@@ -335,13 +368,16 @@ class ChatTurnRepository:
               AND (ma.document_id IS NULL OR ma.document_id = :document_id)
             RETURNING ma.attachment_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "attachment_id": attachment_id,
-            "document_id": document_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "attachment_id": attachment_id,
+                "document_id": document_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            },
+        )
 
     async def mark_upload_failed(
         self,
@@ -371,13 +407,16 @@ class ChatTurnRepository:
               AND ma.upload_status IN ('pending', 'failed')
             RETURNING ma.attachment_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "attachment_id": attachment_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "error_message": error_message,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "attachment_id": attachment_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "error_message": error_message,
+            },
+        )
 
     async def set_ignored(
         self,
@@ -403,13 +442,16 @@ class ChatTurnRepository:
               AND s.user_id = :user_id
             RETURNING ma.attachment_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "attachment_id": attachment_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "ignored": ignored,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "attachment_id": attachment_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "ignored": ignored,
+            },
+        )
 
     async def cancel_turn(
         self,
@@ -431,11 +473,14 @@ class ChatTurnRepository:
               AND m.processing_status IN ('waiting_files', 'answer_failed')
             RETURNING m.message_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            },
+        )
 
     async def claim_answer(
         self,
@@ -457,11 +502,14 @@ class ChatTurnRepository:
               AND m.processing_status IN ('waiting_files', 'answer_failed')
             RETURNING m.message_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            },
+        )
 
     async def claim_ready_answer(
         self,
@@ -477,7 +525,8 @@ class ChatTurnRepository:
             "user_id": user_id,
         }
         async with get_session() as db:
-            result = await db.execute(text("""
+            result = await db.execute(
+                text("""
                 UPDATE messages AS m
                 SET processing_status = 'answering', processing_error = NULL
                 FROM sessions AS s
@@ -520,12 +569,15 @@ class ChatTurnRepository:
                         )
                   )
                 RETURNING m.message_id, m.session_id, s.space_id, m.content
-            """), params)
+            """),
+                params,
+            )
             row = result.one_or_none()
             if row is None:
                 return None
 
-            scope_result = await db.execute(text("""
+            scope_result = await db.execute(
+                text("""
                 SELECT DISTINCT ma.document_id
                 FROM message_attachments AS ma
                 JOIN documents AS d
@@ -538,7 +590,9 @@ class ChatTurnRepository:
                   AND ma.upload_status = 'uploaded'
                   AND d.status = 'indexed'
                 ORDER BY ma.document_id
-            """), params)
+            """),
+                params,
+            )
             document_ids = [
                 str(document_row._mapping["document_id"])
                 for document_row in scope_result.fetchall()
@@ -578,12 +632,15 @@ class ChatTurnRepository:
               AND m.processing_status = 'answering'
             RETURNING m.message_id
         """)
-        return await self._execute_owned_mutation(sql, {
-            "turn_id": turn_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "error_message": error_message,
-        })
+        return await self._execute_owned_mutation(
+            sql,
+            {
+                "turn_id": turn_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "error_message": error_message,
+            },
+        )
 
     async def _execute_owned_mutation(self, sql, params: dict[str, object]) -> bool:
         async with get_session() as db:
@@ -603,7 +660,8 @@ class ChatTurnRepository:
             "tenant_id": tenant_id,
             "user_id": user_id,
         }
-        turn_result = await db.execute(text("""
+        turn_result = await db.execute(
+            text("""
             SELECT m.message_id, m.session_id, m.tenant_id, m.user_id,
                    s.space_id, m.content, m.processing_status,
                    m.processing_error, m.created_at
@@ -615,12 +673,15 @@ class ChatTurnRepository:
               AND m.user_id = :user_id
               AND s.tenant_id = :tenant_id
               AND s.user_id = :user_id
-        """), params)
+        """),
+            params,
+        )
         turn_row = turn_result.one_or_none()
         if turn_row is None:
             return None
 
-        attachment_result = await db.execute(text("""
+        attachment_result = await db.execute(
+            text("""
             SELECT ma.attachment_id, ma.client_id, ma.file_name, ma.mime_type,
                    ma.file_size, ma.document_id, ma.upload_status,
                    ma.upload_error, ma.ignored,
@@ -638,13 +699,13 @@ class ChatTurnRepository:
               AND s.tenant_id = :tenant_id
               AND s.user_id = :user_id
             ORDER BY ma.created_at, ma.attachment_id
-        """), params)
-        attachments = [
-            _row_to_attachment(row)
-            for row in attachment_result.fetchall()
-        ]
+        """),
+            params,
+        )
+        attachments = [_row_to_attachment(row) for row in attachment_result.fetchall()]
 
-        assistant_result = await db.execute(text("""
+        assistant_result = await db.execute(
+            text("""
             SELECT a.message_id, a.content
             FROM messages AS a
             JOIN messages AS m ON m.session_id = a.session_id
@@ -666,23 +727,28 @@ class ChatTurnRepository:
               )
             ORDER BY a.created_at ASC
             LIMIT 1
-        """), params)
+        """),
+            params,
+        )
         assistant_row = assistant_result.one_or_none()
         assistant = None
         if assistant_row is not None:
             assistant_mapping = assistant_row._mapping
             assistant_id = str(assistant_mapping["message_id"])
-            citation_result = await db.execute(text("""
+            citation_result = await db.execute(
+                text("""
                 SELECT document_id, chunk_id, rank, score, retrieval_mode,
                        content_snapshot, title_snapshot
                 FROM message_citations
                 WHERE message_id = :assistant_message_id
                   AND tenant_id = :tenant_id
                 ORDER BY rank
-            """), {
-                "assistant_message_id": assistant_id,
-                "tenant_id": tenant_id,
-            })
+            """),
+                {
+                    "assistant_message_id": assistant_id,
+                    "tenant_id": tenant_id,
+                },
+            )
             citations = [_row_to_citation(row) for row in citation_result.fetchall()]
             assistant = AssistantAnswerView(
                 message_id=assistant_id,

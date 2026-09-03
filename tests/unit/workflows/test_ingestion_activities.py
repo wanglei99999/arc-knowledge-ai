@@ -7,6 +7,22 @@ import pytest
 from app.domain.document import DocumentStatus
 
 
+def test_core_ingestion_uses_the_embedded_parser_by_default() -> None:
+    from app.workflows import ingestion_activities as module
+
+    inp = module.IngestionInput(
+        tenant_id="tenant-1",
+        document_id="document-1",
+        file_path="documents/smoke.md",
+        mime_type="text/markdown",
+        original_filename="smoke.md",
+        task_id="task-1",
+    )
+
+    assert inp.parser_provider == "unstructured_parser"
+    assert module._make_context(inp).config.parser_provider == "unstructured_parser"
+
+
 @pytest.mark.asyncio
 async def test_parse_failure_marks_document_failed(monkeypatch, tmp_path) -> None:
     from app.workflows import ingestion_activities as module
@@ -27,9 +43,7 @@ async def test_parse_failure_marks_document_failed(monkeypatch, tmp_path) -> Non
             *,
             error_message=None,
         ) -> None:
-            self.calls.append(
-                (document_id, tenant_id, status, error_message)
-            )
+            self.calls.append((document_id, tenant_id, status, error_message))
 
     async def fake_download(_object_key: str, _target_path: str) -> None:
         return None

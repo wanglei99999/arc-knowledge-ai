@@ -38,6 +38,7 @@ class BGERerankerProvider(RerankProvider):
                 if self._reranker is None:
                     try:
                         from FlagEmbedding import FlagReranker  # type: ignore[import]
+
                         model = settings.reranker_model_path or _MODEL_NAME
                         self._reranker = FlagReranker(model, use_fp16=True)
                         logger.info("BGERerankerProvider: model loaded from %s", model)
@@ -51,14 +52,15 @@ class BGERerankerProvider(RerankProvider):
                             "BGERerankerProvider: model %s not found locally, rerank will be "
                             "skipped. Run `python scripts/download_bge_model.py` to download. "
                             "Reason: %s",
-                            _MODEL_NAME, e,
+                            _MODEL_NAME,
+                            e,
                         )
                         raise
         return self._reranker
 
     async def health_check(self) -> HealthStatus:
         if self._unavailable:
-            return HealthStatus.UNHEALTHY   # 快速路径，无额外开销
+            return HealthStatus.UNHEALTHY  # 快速路径，无额外开销
         try:
             await asyncio.get_event_loop().run_in_executor(None, self._load_reranker)
             return HealthStatus.HEALTHY

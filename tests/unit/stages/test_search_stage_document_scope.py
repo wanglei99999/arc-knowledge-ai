@@ -17,9 +17,7 @@ class _EmbeddingProvider(EmbeddingProvider):
     async def health_check(self) -> HealthStatus:
         return HealthStatus.HEALTHY
 
-    async def embed(
-        self, ctx: ProcessingContext, texts: list[str]
-    ) -> list[list[float]]:
+    async def embed(self, ctx: ProcessingContext, texts: list[str]) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]
 
     def get_dimension(self) -> int:

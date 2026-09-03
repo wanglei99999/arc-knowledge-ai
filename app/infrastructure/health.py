@@ -42,11 +42,11 @@ async def check_milvus() -> None:
 
 async def check_elasticsearch() -> None:
     client = get_es_client()
-    if not await client.ping():
+    if not await asyncio.to_thread(client.ping):
         raise ConnectionError("Elasticsearch ping returned false")
-    if not await client.indices.exists(index="arc_chunks"):
+    if not await asyncio.to_thread(client.indices.exists, index="arc_chunks"):
         raise ConnectionError("Elasticsearch index arc_chunks is missing")
-    await client.indices.stats(index="arc_chunks")
+    await asyncio.to_thread(client.indices.stats, index="arc_chunks")
 
 
 async def check_temporal() -> None:

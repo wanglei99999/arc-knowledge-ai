@@ -25,6 +25,7 @@ Schema 版本：v3（聊天附件）
     4. DROP SCHEMA public CASCADE; CREATE SCHEMA public;
     5. python scripts/migrate.py
 """
+
 from __future__ import annotations
 
 import asyncio

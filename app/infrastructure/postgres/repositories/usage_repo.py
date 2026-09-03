@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import text
 
@@ -43,8 +43,8 @@ class UsageRepository:
         end: date,
         group_by: str | None = None,
     ) -> dict:
-        start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
-        end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
+        start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+        end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
         params = {"tenant_id": tenant_id, "start": start_dt, "end": end_dt}
 
         async with get_session() as session:
@@ -99,24 +99,21 @@ class UsageRepository:
                     """),
                     params,
                 )
-                by_day = [
-                    {**dict(r), "day": str(r["day"])}
-                    for r in day_rows.mappings()
-                ]
+                by_day = [{**dict(r), "day": str(r["day"])} for r in day_rows.mappings()]
 
         result: dict = {
-            "total_input_tokens":  int(total["input_tokens"]),
+            "total_input_tokens": int(total["input_tokens"]),
             "total_output_tokens": int(total["output_tokens"]),
-            "total_cost_usd":      float(total["cost_usd"]),
-            "by_model":            by_model,
+            "total_cost_usd": float(total["cost_usd"]),
+            "by_model": by_model,
         }
         if group_by == "day":
             result["by_day"] = by_day
         return result
 
     async def get_today_spend(self, tenant_id: str) -> float:
-        today = datetime.now(timezone.utc).date()
-        start_dt = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+        today = datetime.now(UTC).date()
+        start_dt = datetime(today.year, today.month, today.day, tzinfo=UTC)
 
         async with get_session() as session:
             row = await session.execute(

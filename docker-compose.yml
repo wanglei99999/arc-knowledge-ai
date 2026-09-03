@@ -23,6 +23,8 @@ x-app-environment: &app-environment
   OTLP_ENDPOINT: *otlp-endpoint
   RUNTIME_OPTIONAL_SERVICES: "${INCIPIT_OPTIONAL_SERVICES:-}"
   RUNTIME_PROBE_TIMEOUT_SECONDS: "${RUNTIME_PROBE_TIMEOUT_SECONDS:-3}"
+  HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"
+  TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-1}"
   LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
   LLM_BASE_URL: &llm-base-url "${LLM_BASE_URL:-http://host.docker.internal:11434/v1}"
   OPENAI_BASE_URL: *llm-base-url
@@ -40,7 +42,7 @@ x-app-environment: &app-environment
   EMBEDDING_DIMENSIONS: &embedding-dimensions "${EMBEDDING_DIMENSIONS:-768}"
   OPENAI_EMBEDDING_DIMENSIONS: *embedding-dimensions
   SMOKE_TENANT_ID: "${SMOKE_TENANT_ID:-r0-smoke}"
-  SMOKE_EMAIL: "${SMOKE_EMAIL:-r0-smoke@local.invalid}"
+  SMOKE_EMAIL: "${SMOKE_EMAIL:-r0-smoke@example.com}"
   SMOKE_PASSWORD: "${SMOKE_PASSWORD:-R0-local-smoke-only-2026}"
 
 services:
@@ -169,7 +171,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "tctl", "--address", "127.0.0.1:7233", "cluster", "health"]
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
       interval: 10s
       timeout: 5s
       retries: 18

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -12,7 +12,7 @@ _engine = create_async_engine(
     settings.postgres_url,
     pool_size=20,
     max_overflow=10,
-    pool_pre_ping=True,   # 心跳检测，避免使用已断开的连接
+    pool_pre_ping=True,  # 心跳检测，避免使用已断开的连接
     echo=settings.app_env == "development",
 )
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy import text
 
 from app.domain.memory import Memory, MemoryCategory
@@ -21,15 +19,18 @@ class MemoryRepository:
                  :source_session_id, :confidence)
         """)
         async with get_db() as db:
-            await db.execute(sql, {
-                "memory_id":         memory.memory_id,
-                "tenant_id":         memory.tenant_id,
-                "user_id":           memory.user_id,
-                "category":          memory.category.value,
-                "content":           memory.content,
-                "source_session_id": memory.source_session_id,
-                "confidence":        memory.confidence,
-            })
+            await db.execute(
+                sql,
+                {
+                    "memory_id": memory.memory_id,
+                    "tenant_id": memory.tenant_id,
+                    "user_id": memory.user_id,
+                    "category": memory.category.value,
+                    "content": memory.content,
+                    "source_session_id": memory.source_session_id,
+                    "confidence": memory.confidence,
+                },
+            )
 
     async def update_content(self, memory_id: str, content: str) -> None:
         sql = text("""
@@ -47,9 +48,7 @@ class MemoryRepository:
         async with get_db() as db:
             await db.execute(sql, {"memory_id": memory_id})
 
-    async def get_by_ids(
-        self, memory_ids: list[str], tenant_id: str, user_id: str
-    ) -> list[Memory]:
+    async def get_by_ids(self, memory_ids: list[str], tenant_id: str, user_id: str) -> list[Memory]:
         if not memory_ids:
             return []
         sql = text("""
@@ -61,15 +60,13 @@ class MemoryRepository:
               AND user_id   = :user_id
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "ids": memory_ids, "tenant_id": tenant_id, "user_id": user_id
-            })
+            result = await db.execute(
+                sql, {"ids": memory_ids, "tenant_id": tenant_id, "user_id": user_id}
+            )
             rows = result.fetchall()
         return [_row_to_memory(r) for r in rows]
 
-    async def list_by_user(
-        self, tenant_id: str, user_id: str, limit: int = 100
-    ) -> list[Memory]:
+    async def list_by_user(self, tenant_id: str, user_id: str, limit: int = 100) -> list[Memory]:
         sql = text("""
             SELECT memory_id, tenant_id, user_id, category, content,
                    source_session_id, confidence, created_at, updated_at
@@ -79,9 +76,9 @@ class MemoryRepository:
             LIMIT :limit
         """)
         async with get_db() as db:
-            result = await db.execute(sql, {
-                "tenant_id": tenant_id, "user_id": user_id, "limit": limit
-            })
+            result = await db.execute(
+                sql, {"tenant_id": tenant_id, "user_id": user_id, "limit": limit}
+            )
             rows = result.fetchall()
         return [_row_to_memory(r) for r in rows]
 

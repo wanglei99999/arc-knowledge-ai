@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, MilvusClient
+from pymilvus import DataType, MilvusClient
 
 from app.config.settings import settings
 from app.domain.metadata_filter import MetadataFilter

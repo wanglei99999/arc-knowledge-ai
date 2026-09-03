@@ -47,12 +47,14 @@ def convert(input_path: str, output_dir: str, max_docs: int = 50) -> None:
             for qa in para.get("qas", []):
                 answers = [a["text"] for a in qa.get("answers", [])]
                 if answers:
-                    qa_pairs.append({
-                        "doc_file": txt_file.name,
-                        "question": qa["question"],
-                        "answer": answers[0],      # 取第一个答案
-                        "context_snippet": context[:100] + "...",
-                    })
+                    qa_pairs.append(
+                        {
+                            "doc_file": txt_file.name,
+                            "question": qa["question"],
+                            "answer": answers[0],  # 取第一个答案
+                            "context_snippet": context[:100] + "...",
+                        }
+                    )
 
             doc_count += 1
 
@@ -65,7 +67,7 @@ def convert(input_path: str, output_dir: str, max_docs: int = 50) -> None:
 
     print(f"生成 {doc_count} 个 txt 文件 → {dst}/")
     print(f"共 {len(qa_pairs)} 个问答对 → {qa_file}")
-    print(f"\n示例问题：")
+    print("\n示例问题：")
     for qa in qa_pairs[:3]:
         print(f"  Q: {qa['question']}")
         print(f"  A: {qa['answer']}")
@@ -74,9 +76,9 @@ def convert(input_path: str, output_dir: str, max_docs: int = 50) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input",   required=True,       help="CMRC JSON 文件路径")
-    parser.add_argument("--output",  default="./test_docs", help="输出目录")
-    parser.add_argument("--max",     type=int, default=50,  help="最多提取多少篇文章（默认 50）")
+    parser.add_argument("--input", required=True, help="CMRC JSON 文件路径")
+    parser.add_argument("--output", default="./test_docs", help="输出目录")
+    parser.add_argument("--max", type=int, default=50, help="最多提取多少篇文章（默认 50）")
     args = parser.parse_args()
 
     convert(args.input, args.output, args.max)

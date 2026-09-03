@@ -82,6 +82,7 @@ async def get_today_spend_cached(tenant_id: str) -> float:
 
     # 缓存未命中：查 DB
     from app.infrastructure.postgres.repositories.usage_repo import UsageRepository
+
     spend = await UsageRepository().get_today_spend(tenant_id)
 
     try:

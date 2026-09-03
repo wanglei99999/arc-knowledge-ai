@@ -16,15 +16,12 @@ def test_milvus_filter_includes_document_scope() -> None:
     expr = _build_search_filter("tenant-1", "space-1", document_ids=[DOC1, DOC2])
 
     assert expr == (
-        'tenant_id == "tenant-1" and space_id == "space-1" '
-        f'and document_id in ["{DOC1}", "{DOC2}"]'
+        f'tenant_id == "tenant-1" and space_id == "space-1" and document_id in ["{DOC1}", "{DOC2}"]'
     )
 
 
 def test_es_filter_includes_document_scope() -> None:
-    clauses = _build_search_filters(
-        "tenant-1", "space-1", document_ids=[DOC1, DOC2]
-    )
+    clauses = _build_search_filters("tenant-1", "space-1", document_ids=[DOC1, DOC2])
 
     assert clauses == [
         {"term": {"tenant_id": "tenant-1"}},
@@ -35,12 +32,8 @@ def test_es_filter_includes_document_scope() -> None:
 
 @pytest.mark.parametrize("document_ids", [None, []])
 def test_empty_document_scope_keeps_full_space_filters(document_ids) -> None:
-    milvus = _build_search_filter(
-        "tenant-1", "space-1", document_ids=document_ids
-    )
-    elasticsearch = _build_search_filters(
-        "tenant-1", "space-1", document_ids=document_ids
-    )
+    milvus = _build_search_filter("tenant-1", "space-1", document_ids=document_ids)
+    elasticsearch = _build_search_filters("tenant-1", "space-1", document_ids=document_ids)
 
     assert milvus == 'tenant_id == "tenant-1" and space_id == "space-1"'
     assert elasticsearch == [
@@ -56,9 +49,7 @@ def test_document_scope_rejects_invalid_uuid(builder) -> None:
 
 
 def test_document_scope_and_metadata_filter_coexist() -> None:
-    metadata = [
-        MetadataFilter(key="project", operator=FilterOperator.EQ, value="A")
-    ]
+    metadata = [MetadataFilter(key="project", operator=FilterOperator.EQ, value="A")]
 
     milvus = _build_search_filter(
         "tenant-1",

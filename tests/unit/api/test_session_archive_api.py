@@ -74,16 +74,18 @@ class _Service:
     async def list(self, *args, **kwargs):
         self.calls.append(("list", args, kwargs))
         return SessionListResult(
-            sessions=[Session(
-                session_id="session-1",
-                tenant_id="tenant-1",
-                user_id="user-1",
-                space_id="space-1",
-                title="接入鉴权方案",
-                pinned_at=datetime(2026, 9, 1, 2, 30, tzinfo=UTC),
-                created_at=datetime(2026, 8, 20, 1, 0, tzinfo=UTC),
-                updated_at=datetime(2026, 8, 31, 9, 15, tzinfo=UTC),
-            )],
+            sessions=[
+                Session(
+                    session_id="session-1",
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    space_id="space-1",
+                    title="接入鉴权方案",
+                    pinned_at=datetime(2026, 9, 1, 2, 30, tzinfo=UTC),
+                    created_at=datetime(2026, 8, 20, 1, 0, tzinfo=UTC),
+                    updated_at=datetime(2026, 8, 31, 9, 15, tzinfo=UTC),
+                )
+            ],
             total=1,
         )
 
@@ -123,11 +125,13 @@ def test_archive_returns_204_and_uses_authenticated_owner(api) -> None:
     response = client.post("/sessions/session-1/archive")
 
     assert response.status_code == 204
-    assert service.calls == [(
-        "archive",
-        ("session-1", "tenant-1", "user-1"),
-        {},
-    )]
+    assert service.calls == [
+        (
+            "archive",
+            ("session-1", "tenant-1", "user-1"),
+            {},
+        )
+    ]
 
 
 def test_archive_unknown_session_returns_404(api) -> None:
@@ -137,11 +141,13 @@ def test_archive_unknown_session_returns_404(api) -> None:
     response = client.post("/sessions/missing/archive")
 
     assert response.status_code == 404
-    assert service.calls == [(
-        "archive",
-        ("missing", "tenant-1", "user-1"),
-        {},
-    )]
+    assert service.calls == [
+        (
+            "archive",
+            ("missing", "tenant-1", "user-1"),
+            {},
+        )
+    ]
 
 
 def test_archive_busy_returns_structured_409(api) -> None:
@@ -192,17 +198,17 @@ def test_pin_unknown_or_archived_session_returns_404(api) -> None:
 def test_rename_trims_title_and_returns_authoritative_session(api) -> None:
     client, service = api
 
-    response = client.patch(
-        "/sessions/session-1", json={"title": "  新的标题  "}
-    )
+    response = client.patch("/sessions/session-1", json={"title": "  新的标题  "})
 
     assert response.status_code == 200
     assert response.json()["title"] == "新的标题"
-    assert service.calls == [(
-        "rename",
-        ("session-1", "tenant-1", "user-1", "新的标题"),
-        {},
-    )]
+    assert service.calls == [
+        (
+            "rename",
+            ("session-1", "tenant-1", "user-1", "新的标题"),
+            {},
+        )
+    ]
 
 
 @pytest.mark.parametrize("title", ["   ", "x" * 101])
@@ -219,9 +225,7 @@ def test_rename_unknown_or_archived_session_returns_404(api) -> None:
     client, service = api
     service.rename_result = None
 
-    response = client.patch(
-        "/sessions/missing", json={"title": "新的标题"}
-    )
+    response = client.patch("/sessions/missing", json={"title": "新的标题"})
 
     assert response.status_code == 404
 
@@ -240,9 +244,7 @@ def test_active_session_list_exposes_pin_timestamp(api) -> None:
 def test_archived_list_uses_static_route_and_returns_space_summary(api) -> None:
     client, service = api
 
-    response = client.get(
-        "/sessions/archived?query=上传&space_id=space-1&limit=50&offset=0"
-    )
+    response = client.get("/sessions/archived?query=上传&space_id=space-1&limit=50&offset=0")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -261,16 +263,18 @@ def test_archived_list_uses_static_route_and_returns_space_summary(api) -> None:
         ],
         "total": 1,
     }
-    assert service.calls == [(
-        "list_archived",
-        ("tenant-1", "user-1"),
-        {
-            "query": "上传",
-            "space_id": "space-1",
-            "limit": 50,
-            "offset": 0,
-        },
-    )]
+    assert service.calls == [
+        (
+            "list_archived",
+            ("tenant-1", "user-1"),
+            {
+                "query": "上传",
+                "space_id": "space-1",
+                "limit": 50,
+                "offset": 0,
+            },
+        )
+    ]
 
 
 def test_archived_list_rejects_invalid_pagination(api) -> None:

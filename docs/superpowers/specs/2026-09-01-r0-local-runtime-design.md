@@ -108,6 +108,10 @@ postgres + minio + etcd + milvus + elasticsearch + redis + temporal
 
 `start` 只启动核心层；`start -Full` 启用三个可选 profile。单独 profile 可在实现时通过参数组合开放，但不增加多个重复脚本。
 
+核心层的标准文档入库默认使用后端镜像内置的 `unstructured_parser`；只有显式选择
+OCR/复杂文档能力时才依赖 `paddleocr_parser` 或 `mineru_parser`。因此核心 L1 不能
+隐式连接未启用的 `ocr` profile 服务。
+
 ### 6.3 外部模型依赖
 
 LLM 与 Embedding 继续使用 `.env` 指定的 OpenAI 兼容端点或 Ollama。R0 不强制把 Ollama 纳入 Compose，但 `doctor` 和 `status` 必须检查所选端点是否可达。

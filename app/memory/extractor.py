@@ -7,6 +7,7 @@ MemoryExtractor — LLM 驱动的记忆提取与会话压缩。
 
 后台异步调用，不阻塞 SSE 响应。
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -64,8 +65,12 @@ def _make_ctx(tenant_id: str, llm_provider: str | None = None) -> ProcessingCont
         task_id=str(uuid.uuid4()),
         trace_id=str(uuid.uuid4()),
         quota=QuotaSnapshot(
-            max_documents=0, max_storage_bytes=0, max_api_calls_per_day=999999,
-            used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+            max_documents=0,
+            max_storage_bytes=0,
+            max_api_calls_per_day=999999,
+            used_documents=0,
+            used_storage_bytes=0,
+            used_api_calls_today=0,
         ),
         config=config,
     )
@@ -197,9 +202,7 @@ class MemoryExtractor:
             )
 
         except Exception:
-            logger.exception(
-                "Background memory extraction failed for session=%s", session_id
-            )
+            logger.exception("Background memory extraction failed for session=%s", session_id)
 
     # ── Layer 2: 情节记忆压缩 ─────────────────────────────────────────────────
 

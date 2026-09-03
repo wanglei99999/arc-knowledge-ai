@@ -95,9 +95,7 @@ class RateLimitMiddleware:
             prev_raw = await redis.get(prev_key)
             prev_count = int(prev_raw) if prev_raw else 0
         except Exception:
-            logger.warning(
-                "Rate limit: Redis unavailable, failing open for tenant=%s", tenant_id
-            )
+            logger.warning("Rate limit: Redis unavailable, failing open for tenant=%s", tenant_id)
             await self._app(scope, receive, send)
             return
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from app.pipeline.core.context import ProcessingContext
 from app.pipeline.core.registry import registry
@@ -40,6 +41,27 @@ class UnstructuredParserProvider(ParserProvider):
         return await loop.run_in_executor(None, self._parse_sync, file_path)
 
     def _parse_sync(self, file_path: str) -> ParsedDocument:
+        path = Path(file_path)
+        if path.suffix.lower() in {".md", ".markdown", ".txt"}:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+            title = next(
+                (
+                    line.removeprefix("#").strip()
+                    for line in text.splitlines()
+                    if line.startswith("# ")
+                ),
+                None,
+            )
+            return ParsedDocument(
+                text=text,
+                title=title,
+                metadata={
+                    "source": file_path,
+                    "provider": "plain-text",
+                    "char_count": len(text),
+                },
+            )
+
         from unstructured.partition.auto import partition  # 懒加载，避免启动时开销
 
         elements = partition(filename=file_path, strategy="fast")
@@ -78,6 +100,7 @@ class UnstructuredParserProvider(ParserProvider):
     async def health_check(self) -> HealthStatus:
         try:
             import unstructured  # noqa: F401
+
             return HealthStatus.HEALTHY
         except ImportError:
             return HealthStatus.UNHEALTHY

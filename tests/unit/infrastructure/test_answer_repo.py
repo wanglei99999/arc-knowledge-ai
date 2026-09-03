@@ -35,10 +35,14 @@ class _FakeDB:
         if self.fail_on and self.fail_on in sql:
             raise RuntimeError("database write failed")
         if "insert into messages" in sql:
-            return _Result(SimpleNamespace(_mapping={
-                **params,
-                "created_at": datetime(2026, 8, 29, tzinfo=UTC),
-            }))
+            return _Result(
+                SimpleNamespace(
+                    _mapping={
+                        **params,
+                        "created_at": datetime(2026, 8, 29, tzinfo=UTC),
+                    }
+                )
+            )
         return _Result(SimpleNamespace(_mapping={"ok": True}))
 
 
@@ -80,14 +84,16 @@ async def test_persist_answer_writes_all_critical_state_in_one_transaction(
 
     db = _FakeDB()
     _patch_db(monkeypatch, module, db)
-    citations = [{
-        "doc_id": DOC_ID,
-        "chunk_id": CHUNK_ID,
-        "doc_name": "contract.pdf",
-        "content": "合同金额为 100 万元",
-        "score": 0.91,
-        "source": "hybrid",
-    }]
+    citations = [
+        {
+            "doc_id": DOC_ID,
+            "chunk_id": CHUNK_ID,
+            "doc_name": "contract.pdf",
+            "content": "合同金额为 100 万元",
+            "score": 0.91,
+            "source": "hybrid",
+        }
+    ]
 
     message = await AnswerRepository().save_assistant_with_citations(
         source_turn_id=TURN_ID,
@@ -168,14 +174,16 @@ async def test_persist_answer_rolls_back_when_citation_insert_fails(
             user_id="user-1",
             content="回答",
             space_id=SPACE_ID,
-            citations=[{
-                "doc_id": DOC_ID,
-                "chunk_id": CHUNK_ID,
-                "doc_name": "contract.pdf",
-                "content": "原文",
-                "score": 0.8,
-                "source": "vector",
-            }],
+            citations=[
+                {
+                    "doc_id": DOC_ID,
+                    "chunk_id": CHUNK_ID,
+                    "doc_name": "contract.pdf",
+                    "content": "原文",
+                    "score": 0.8,
+                    "source": "vector",
+                }
+            ],
         )
 
     assert db.context_entries == 1

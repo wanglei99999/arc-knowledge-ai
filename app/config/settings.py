@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # ── 应用 ──────────────────────────────────────────────────────────────────
@@ -81,8 +82,8 @@ class Settings(BaseSettings):
     otel_enabled: bool = True
     otel_service_name: str = "arc-knowledge-ai"
     otlp_endpoint: str = "http://localhost:4317"  # Phoenix OTLP gRPC 端点（也兼容 Jaeger/Tempo）
-    otel_capture_content: bool = True   # 是否把 query/prompt 等内容写入 span（结构永远记，内容可关）
-    otel_content_max_chars: int = 300   # 单条文档内容写入 span 的截断长度
+    otel_capture_content: bool = True  # 是否把 query/prompt 等内容写入 span（结构永远记，内容可关）
+    otel_content_max_chars: int = 300  # 单条文档内容写入 span 的截断长度
 
     # ── ModelHub / 熔断降级 ───────────────────────────────────────────────────
     llm_fallback_provider: str = "ollama_llm"  # 主模型失败时切换的备用 Provider
@@ -121,9 +122,8 @@ class Settings(BaseSettings):
     # ── 文档解析服务（mineru_parser provider 专用）────────────────────────────
     mineru_service_url: str = "http://localhost:7999"
     mineru_lang_list: list[str] = Field(default=["ch"])
-    mineru_backend: str = (
-        "hybrid-auto-engine"  # pipeline/hybrid-auto-engine/hybrid-http-client/vlm-auto-engine/vlm-http-client
-    )
+    # pipeline / hybrid-auto-engine / hybrid-http-client / vlm-auto-engine / vlm-http-client
+    mineru_backend: str = "hybrid-auto-engine"
     mineru_server_url: str = (
         ""  # hybrid-http-client/vlm-http-client 时填 openai-compatible server URL
     )

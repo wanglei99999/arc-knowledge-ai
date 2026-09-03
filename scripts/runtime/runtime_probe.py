@@ -53,9 +53,7 @@ async def probe_schema() -> dict[str, object]:
 
     missing = missing_schema_tables(set(result.scalars()))
     detail = (
-        "all migration tables present"
-        if not missing
-        else f"missing tables: {', '.join(missing)}"
+        "all migration tables present" if not missing else f"missing tables: {', '.join(missing)}"
     )
     return {"name": "schema", "ok": not missing, "detail": detail}
 

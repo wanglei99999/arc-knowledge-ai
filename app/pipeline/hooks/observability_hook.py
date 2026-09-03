@@ -68,9 +68,7 @@ class ObservabilityHook(BaseHook):
                 if extractor.matches(stage_name, payload):
                     span.set_attributes(extractor.extract(stage_name, payload))
             except Exception:
-                logger.warning(
-                    "content extractor failed on stage %s", stage_name, exc_info=True
-                )
+                logger.warning("content extractor failed on stage %s", stage_name, exc_info=True)
 
     async def _handle(self, event: HookEvent) -> HookResult:
         ctx = event.ctx

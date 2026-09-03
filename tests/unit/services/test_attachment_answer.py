@@ -80,9 +80,7 @@ async def test_answer_rejects_ingesting_or_empty_turn(readiness) -> None:
     service = ChatTurnService(turn_repo=repository)
 
     with pytest.raises(ChatTurnConflictError):
-        await service.prepare_answer(
-            turn_id="turn-1", tenant_id="tenant-1", user_id="user-1"
-        )
+        await service.prepare_answer(turn_id="turn-1", tenant_id="tenant-1", user_id="user-1")
 
     assert repository.claim_calls == []
 
@@ -104,9 +102,7 @@ async def test_answer_claim_allows_only_one_concurrent_request() -> None:
         turn_id="turn-1", tenant_id="tenant-1", user_id="user-1"
     )
     with pytest.raises(ChatTurnConflictError, match="状态"):
-        await service.prepare_answer(
-            turn_id="turn-1", tenant_id="tenant-1", user_id="user-1"
-        )
+        await service.prepare_answer(turn_id="turn-1", tenant_id="tenant-1", user_id="user-1")
 
     assert prepared.document_ids == [DOC1]
     assert len(repository.claim_calls) == 2
@@ -138,14 +134,16 @@ def _working_memory() -> WorkingMemory:
     return WorkingMemory(
         anchor=[],
         summary=None,
-        recent=[Message(
-            message_id="66666666-6666-4666-8666-666666666666",
-            session_id="77777777-7777-4777-8777-777777777777",
-            tenant_id="tenant-1",
-            user_id="user-1",
-            role="user",
-            content="合同金额是多少？",
-        )],
+        recent=[
+            Message(
+                message_id="66666666-6666-4666-8666-666666666666",
+                session_id="77777777-7777-4777-8777-777777777777",
+                tenant_id="tenant-1",
+                user_id="user-1",
+                role="user",
+                content="合同金额是多少？",
+            )
+        ],
         message_count=1,
     )
 
@@ -200,19 +198,23 @@ class _AnswerOrchestrator:
         self.retrieval_calls.append(kwargs)
         return RetrievalResult(
             query_text=kwargs["query_text"],
-            hits=[SearchHit(
-                chunk_id="55555555-5555-4555-8555-555555555555",
-                document_id=DOC1,
-                chunk_index=0,
-                score=0.9,
-                source="hybrid",
-            )],
-            chunks=[{
-                "chunk_id": "55555555-5555-4555-8555-555555555555",
-                "document_id": DOC1,
-                "original_name": "contract.pdf",
-                "content": "合同金额为 100 万元",
-            }],
+            hits=[
+                SearchHit(
+                    chunk_id="55555555-5555-4555-8555-555555555555",
+                    document_id=DOC1,
+                    chunk_index=0,
+                    score=0.9,
+                    source="hybrid",
+                )
+            ],
+            chunks=[
+                {
+                    "chunk_id": "55555555-5555-4555-8555-555555555555",
+                    "document_id": DOC1,
+                    "original_name": "contract.pdf",
+                    "content": "合同金额为 100 万元",
+                }
+            ],
         )
 
     async def build_llm(self, tenant_id, model=None):
@@ -278,17 +280,13 @@ async def _collect_attachment_answer(*, manager: _AnswerManager):
 
 
 async def test_attachment_answer_does_not_save_user_message_twice() -> None:
-    output, _, _, _ = await _collect_attachment_answer(
-        manager=_AnswerManager(forbid_save=True)
-    )
+    output, _, _, _ = await _collect_attachment_answer(manager=_AnswerManager(forbid_save=True))
 
     assert output[0] == "金额为 100 万元。"
 
 
 async def test_attachment_answer_omits_semantic_memory_lookup() -> None:
-    output, _, _, _ = await _collect_attachment_answer(
-        manager=_AnswerManager(forbid_semantic=True)
-    )
+    output, _, _, _ = await _collect_attachment_answer(manager=_AnswerManager(forbid_semantic=True))
 
     assert output[0] == "金额为 100 万元。"
 

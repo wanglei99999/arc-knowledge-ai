@@ -92,9 +92,7 @@ async def test_retry_loser_does_not_clean_indexes(monkeypatch) -> None:
         raise AssertionError("没有抢到重试权的请求不能清理索引")
 
     monkeypatch.setattr(service_module, "ChunkRepository", _Repo)
-    monkeypatch.setattr(
-        service_module, "milvus_delete_by_document", unexpected_cleanup
-    )
+    monkeypatch.setattr(service_module, "milvus_delete_by_document", unexpected_cleanup)
     monkeypatch.setattr(service_module, "es_delete_by_document", unexpected_cleanup)
 
     with pytest.raises(ValueError, match="already being retried"):
@@ -123,14 +121,16 @@ async def test_ingest_marks_document_failed_when_workflow_cannot_start(
     )
 
     with pytest.raises(RuntimeError, match="Temporal unavailable"):
-        await DocumentService().ingest(IngestRequest(
-            tenant_id="tenant-1",
-            space_id="space-1",
-            file_path="tenant/space/document.pdf",
-            mime_type="application/pdf",
-            original_filename="contract.pdf",
-            document_id="document-1",
-        ))
+        await DocumentService().ingest(
+            IngestRequest(
+                tenant_id="tenant-1",
+                space_id="space-1",
+                file_path="tenant/space/document.pdf",
+                mime_type="application/pdf",
+                original_filename="contract.pdf",
+                document_id="document-1",
+            )
+        )
 
     args, kwargs = status_updates[0]
     assert args[:3] == ("document-1", "tenant-1", DocumentStatus.FAILED)

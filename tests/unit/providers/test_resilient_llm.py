@@ -1,8 +1,9 @@
 """ResilientLLMProvider 单元测试"""
+
 from __future__ import annotations
 
-from typing import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 
@@ -10,8 +11,8 @@ from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantCo
 from app.providers.base import ChatMessage, HealthStatus, LLMProvider
 from app.providers.llm.resilient_llm import ResilientLLMProvider
 
-
 # ── Fake Providers ────────────────────────────────────────────────────────────
+
 
 class FakeLLMProvider(LLMProvider):
     provider_id = "fake_llm"
@@ -57,11 +58,16 @@ class AlwaysFailLLMProvider(LLMProvider):
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def ctx() -> ProcessingContext:
     quota = QuotaSnapshot(
-        max_documents=100, max_storage_bytes=1024, max_api_calls_per_day=1000,
-        used_documents=0, used_storage_bytes=0, used_api_calls_today=0,
+        max_documents=100,
+        max_storage_bytes=1024,
+        max_api_calls_per_day=1000,
+        used_documents=0,
+        used_storage_bytes=0,
+        used_api_calls_today=0,
     )
     return ProcessingContext.create(
         tenant_id="test-tenant",
@@ -77,6 +83,7 @@ def messages() -> list[ChatMessage]:
 
 
 # ── generate() 测试 ───────────────────────────────────────────────────────────
+
 
 async def test_generate_returns_primary_response(ctx, messages) -> None:
     primary = FakeLLMProvider(response="primary answer")
@@ -95,8 +102,10 @@ async def test_generate_falls_back_after_all_retries_fail(ctx, messages) -> None
     primary = AlwaysFailLLMProvider()
     fallback = FakeLLMProvider(response="fallback answer")
 
-    with patch("app.providers.llm.resilient_llm.registry") as mock_registry, \
-         patch("app.providers.llm.resilient_llm.settings") as mock_settings:
+    with (
+        patch("app.providers.llm.resilient_llm.registry") as mock_registry,
+        patch("app.providers.llm.resilient_llm.settings") as mock_settings,
+    ):
         mock_settings.llm_max_retries = 2
         mock_settings.llm_retry_min_wait = 0
         mock_settings.llm_retry_max_wait = 0
@@ -127,6 +136,7 @@ async def test_generate_succeeds_after_transient_failure(ctx, messages) -> None:
 
 # ── stream_generate() 测试 ────────────────────────────────────────────────────
 
+
 async def test_stream_generate_yields_tokens(ctx, messages) -> None:
     primary = FakeLLMProvider(response="hello world")
     provider = ResilientLLMProvider(primary, "fake_fallback")
@@ -149,6 +159,7 @@ async def test_stream_falls_back_before_first_token(ctx, messages) -> None:
 
 async def test_stream_raises_after_partial_tokens(ctx, messages) -> None:
     """已推送部分 token 后出错，不应切换 fallback，直接抛出。"""
+
     async def _partial_stream(ctx, messages, **kwargs):
         yield "first"
         raise RuntimeError("mid-stream failure")

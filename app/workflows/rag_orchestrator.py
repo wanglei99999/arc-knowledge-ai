@@ -206,11 +206,7 @@ class RAGOrchestrator:
             with activate_span(span):
                 # 带 metadata_filters 时绕过语义缓存：缓存键不含 filters，
                 # 否则同一 query 不同过滤条件会命中错误的缓存答案。
-                use_cache = (
-                    not history
-                    and not metadata_filters
-                    and not canonical_document_ids
-                )
+                use_cache = not history and not metadata_filters and not canonical_document_ids
                 if use_cache:
                     with traced_block("cache.lookup") as cache_span:
                         cached = await _cache.get(query, tenant_id, space_id)

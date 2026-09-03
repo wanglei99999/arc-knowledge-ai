@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from contextlib import aclosing
-from typing import Any, AsyncIterator
+from typing import Any
 
 from opentelemetry.trace import Span, StatusCode
 

@@ -80,9 +80,7 @@ class _InMemoryChatBackend:
 
     def mark_indexed(self) -> None:
         turn = self._require_turn()
-        attachment = replace(
-            turn.attachments[0], status=AttachmentStatus.INDEXED
-        )
+        attachment = replace(turn.attachments[0], status=AttachmentStatus.INDEXED)
         self.turn = replace(
             turn,
             readiness=TurnReadiness.READY,
@@ -93,9 +91,7 @@ class _InMemoryChatBackend:
     async def prepare_answer(self, **kwargs) -> AnswerClaim:
         turn = self._require_turn()
         assert turn.readiness is TurnReadiness.READY
-        self.turn = replace(
-            turn, processing_status=TurnProcessingStatus.ANSWERING
-        )
+        self.turn = replace(turn, processing_status=TurnProcessingStatus.ANSWERING)
         self.messages[0] = self._user_history()
         return AnswerClaim(
             turn_id=turn.turn_id,
@@ -110,15 +106,17 @@ class _InMemoryChatBackend:
     async def stream_answer(self, claim):
         self.scoped_document_ids.append(list(claim.document_ids))
         yield "金额为 100 万元。"
-        citations = [{
-            "doc_id": "document-1",
-            "chunk_id": "chunk-1",
-            "doc_name": "contract.pdf",
-            "content": "合同金额为 100 万元",
-            "score": 0.98,
-            "source": "hybrid",
-            "rank": 1,
-        }]
+        citations = [
+            {
+                "doc_id": "document-1",
+                "chunk_id": "chunk-1",
+                "doc_name": "contract.pdf",
+                "content": "合同金额为 100 万元",
+                "score": 0.98,
+                "source": "hybrid",
+                "rank": 1,
+            }
+        ]
         turn = self._require_turn()
         assistant = AssistantAnswerView(
             message_id="answer-1",
@@ -131,15 +129,17 @@ class _InMemoryChatBackend:
             assistant=assistant,
         )
         self.messages[0] = self._user_history()
-        self.messages.append(SessionMessageView(
-            message_id="answer-1",
-            role="assistant",
-            content=assistant.content,
-            processing_status=None,
-            processing_error=None,
-            attachments=[],
-            citations=citations,
-        ))
+        self.messages.append(
+            SessionMessageView(
+                message_id="answer-1",
+                role="assistant",
+                content=assistant.content,
+                processing_status=None,
+                processing_error=None,
+                attachments=[],
+                citations=citations,
+            )
+        )
         yield citations
 
     async def get_messages(self, session_id, tenant_id, user_id, limit):

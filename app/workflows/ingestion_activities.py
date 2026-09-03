@@ -33,7 +33,7 @@ class IngestionInput:
     embedding_provider: str = "openai_embedding"
     chunk_size: int = 400
     chunk_overlap: int = 50
-    parser_provider: str = "mineru_parser"
+    parser_provider: str = "unstructured_parser"
     chunker_stage: str = "token_chunker"  # 或 markdown_chunker（结构感知切分）
     metadata: dict | None = None  # 文档级 metadata，透传合并到每个 chunk
 
@@ -44,6 +44,7 @@ def _make_context(inp: IngestionInput) -> ProcessingContext:
         tenant_id=inp.tenant_id,
         ingestion_strategy=inp.ingestion_strategy,
         embedding_provider=inp.embedding_provider,
+        parser_provider=inp.parser_provider,
         chunk_size=inp.chunk_size,
         chunk_overlap=inp.chunk_overlap,
     )
@@ -164,7 +165,7 @@ async def chunk_activity(inp: IngestionInput, parsed_dict: dict) -> list[dict]:
             "content": c.content,
             "chunk_index": c.chunk_index,
             "token_count": c.token_count,
-            #一个是chunk级的metadata，一个是文档级的metadata
+            # 一个是chunk级的metadata，一个是文档级的metadata
             "metadata": {**c.metadata, **(inp.metadata or {})},
         }
         for c in chunks

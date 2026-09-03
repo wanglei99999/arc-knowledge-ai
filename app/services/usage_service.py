@@ -27,10 +27,9 @@ def register_handlers() -> None:
         # 查模型单价，计算费用（写入时快照，反映调用时真实单价）
         config = await _model_config_repo.get(model)
         if config:
-            cost_usd = (
-                input_tokens / 1000 * float(config["input_cost_per_1k"])
-                + output_tokens / 1000 * float(config["output_cost_per_1k"])
-            )
+            cost_usd = input_tokens / 1000 * float(
+                config["input_cost_per_1k"]
+            ) + output_tokens / 1000 * float(config["output_cost_per_1k"])
         else:
             cost_usd = 0.0
 

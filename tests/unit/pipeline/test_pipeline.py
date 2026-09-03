@@ -1,4 +1,5 @@
 """Pipeline 框架单元测试——不依赖任何外部服务"""
+
 import pytest
 
 from app.pipeline.core.context import ProcessingContext
@@ -7,17 +8,19 @@ from app.pipeline.core.hook import BaseHook, HookEvent, HookResult, Phase
 from app.pipeline.core.pipeline import Pipeline
 from app.pipeline.core.stage import BaseStage
 
-
 # ── 测试用 Stage ──────────────────────────────────────────────────────────────
+
 
 class UpperStage(BaseStage[str, str]):
     name = "upper"
+
     async def _execute(self, ctx: ProcessingContext, input: str) -> str:
         return input.upper()
 
 
 class ReverseStage(BaseStage[str, str]):
     name = "reverse"
+
     async def _execute(self, ctx: ProcessingContext, input: str) -> str:
         return input[::-1]
 
@@ -25,11 +28,13 @@ class ReverseStage(BaseStage[str, str]):
 class RequiresKeyStage(BaseStage[str, str]):
     name = "requires_key"
     requires = frozenset({"special_key"})
+
     async def _execute(self, ctx: ProcessingContext, input: str) -> str:
         return input + ctx.metadata["special_key"]
 
 
 # ── 测试用 Hook ───────────────────────────────────────────────────────────────
+
 
 class RecordingHook(BaseHook):
     phase = [Phase.PRE_STAGE, Phase.POST_STAGE]
@@ -61,6 +66,7 @@ class SkipHook(BaseHook):
 
 
 # ── 测试 ──────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_pipeline_runs_stages_in_order(fake_ctx: ProcessingContext) -> None:
@@ -125,7 +131,7 @@ async def test_skip_hook_skips_stage(fake_ctx: ProcessingContext) -> None:
     # SkipStage → 每个 Stage 都被跳过，输出维持输入不变
     pipeline = Pipeline.start(UpperStage()).with_hooks([SkipHook()])
     result = await pipeline.run(fake_ctx, "hello")
-    assert result == "hello"   # 没有经过 UpperStage
+    assert result == "hello"  # 没有经过 UpperStage
 
 
 @pytest.mark.asyncio

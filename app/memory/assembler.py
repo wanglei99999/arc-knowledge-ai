@@ -9,6 +9,7 @@ ContextAssembler — 按比例 token 预算组装 LLM 输入。
   Long-term memories           12%
   Response buffer             固定 500 tokens
 """
+
 from __future__ import annotations
 
 from app.domain.memory import Memory, Message, WorkingMemory
@@ -84,23 +85,17 @@ class ContextAssembler:
         buffer = 500
         available = context_window - buffer
 
-        budget_rag     = int(available * 0.40)
-        budget_recent  = int(available * 0.25)
+        budget_rag = int(available * 0.40)
+        budget_recent = int(available * 0.25)
         budget_summary = int(available * 0.06)
         budget_memories = int(available * 0.12)
 
         messages: list[ChatMessage] = []
 
         # ── 1. System message ─────────────────────────────────────────────────
-        system_parts = [
-            self.STRICT_SOURCE_PROMPT if strict_sources else self.SYSTEM_PROMPT
-        ]
+        system_parts = [self.STRICT_SOURCE_PROMPT if strict_sources else self.SYSTEM_PROMPT]
 
-        mem_text = (
-            ""
-            if strict_sources
-            else _memories_text(semantic_memories, budget_memories)
-        )
+        mem_text = "" if strict_sources else _memories_text(semantic_memories, budget_memories)
         if mem_text:
             system_parts.append(f"\n\n## 用户记忆\n{mem_text}")
 
@@ -120,10 +115,12 @@ class ContextAssembler:
         # ── 3. 情节记忆摘要 ───────────────────────────────────────────────────
         if working_memory.summary:
             truncated_summary = _truncate(working_memory.summary, budget_summary)
-            messages.append(ChatMessage(
-                role="system",
-                content=f"[历史对话摘要]\n{truncated_summary}",
-            ))
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=f"[历史对话摘要]\n{truncated_summary}",
+                )
+            )
 
         # ── 4. Last-N 近期消息 ────────────────────────────────────────────────
         recent = _trim_messages(working_memory.recent, budget_recent)

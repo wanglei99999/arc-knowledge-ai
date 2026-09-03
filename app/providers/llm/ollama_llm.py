@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -51,15 +51,17 @@ class OllamaLLMProvider(LLMProvider):
         output_tokens: int,
     ) -> None:
         try:
-            await event_bus.publish(DomainEvent(
-                type=EventType.TOKEN_CONSUMED,
-                tenant_id=ctx.tenant_id,
-                payload={
-                    "model": model,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                },
-            ))
+            await event_bus.publish(
+                DomainEvent(
+                    type=EventType.TOKEN_CONSUMED,
+                    tenant_id=ctx.tenant_id,
+                    payload={
+                        "model": model,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    },
+                )
+            )
         except Exception as e:
             logger.warning("Failed to publish TOKEN_CONSUMED event: %s", e)
 
@@ -74,15 +76,16 @@ class OllamaLLMProvider(LLMProvider):
             resp = await client.post(
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    model,
+                    "model": model,
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
-                    "stream":   False,
+                    "stream": False,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
             await self._publish_usage(
-                ctx, model,
+                ctx,
+                model,
                 data.get("prompt_eval_count", 0),
                 data.get("eval_count", 0),
             )
@@ -100,9 +103,9 @@ class OllamaLLMProvider(LLMProvider):
                 "POST",
                 f"{self._base_url}/api/chat",
                 json={
-                    "model":    model,
+                    "model": model,
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
-                    "stream":   True,
+                    "stream": True,
                 },
             ) as resp:
                 resp.raise_for_status()
@@ -116,7 +119,8 @@ class OllamaLLMProvider(LLMProvider):
                     # 最后一个 chunk done=true，包含 token 统计
                     if data.get("done"):
                         await self._publish_usage(
-                            ctx, model,
+                            ctx,
+                            model,
                             data.get("prompt_eval_count", 0),
                             data.get("eval_count", 0),
                         )

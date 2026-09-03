@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,19 +26,12 @@ def _register_components() -> None:
     必须在应用启动时执行，否则 registry.get_stage() 会找不到对应实现。
     """
     # ── Ingestion ────────────────────────────────────────────────────────────
-    import app.pipeline.stages.chunking.token_chunker  # noqa: F401
     import app.pipeline.stages.chunking.markdown_chunker  # noqa: F401
+    import app.pipeline.stages.chunking.token_chunker  # noqa: F401
     import app.pipeline.stages.embedding.embed_stage  # noqa: F401
     import app.pipeline.stages.embedding.es_index_stage  # noqa: F401
     import app.pipeline.stages.embedding.milvus_index_stage  # noqa: F401
     import app.pipeline.stages.parsing.parser_stage  # noqa: F401
-    import app.pipeline.strategies.ingestion.ocr_strategy  # noqa: F401
-    import app.pipeline.strategies.ingestion.standard_strategy  # noqa: F401
-    import app.providers.embedding.openai_embedding  # noqa: F401
-    import app.providers.parser.mineru_provider  # noqa: F401
-    import app.providers.parser.paddleocr_provider  # noqa: F401
-    import app.providers.parser.smart_parser_provider  # noqa: F401
-    import app.providers.parser.unstructured_provider  # noqa: F401
 
     # ── Retrieval / RAG ──────────────────────────────────────────────────────
     import app.pipeline.stages.retrieval.keyword_search_stage  # noqa: F401
@@ -46,9 +39,16 @@ def _register_components() -> None:
     import app.pipeline.stages.retrieval.rerank_stage  # noqa: F401
     import app.pipeline.stages.retrieval.rrf_fusion_stage  # noqa: F401
     import app.pipeline.stages.retrieval.vector_search_stage  # noqa: F401
+    import app.pipeline.strategies.ingestion.ocr_strategy  # noqa: F401
+    import app.pipeline.strategies.ingestion.standard_strategy  # noqa: F401
     import app.pipeline.strategies.retrieval.hybrid_strategy  # noqa: F401
+    import app.providers.embedding.openai_embedding  # noqa: F401
     import app.providers.llm.ollama_llm  # noqa: F401
     import app.providers.llm.openai_llm  # noqa: F401
+    import app.providers.parser.mineru_provider  # noqa: F401
+    import app.providers.parser.paddleocr_provider  # noqa: F401
+    import app.providers.parser.smart_parser_provider  # noqa: F401
+    import app.providers.parser.unstructured_provider  # noqa: F401
     import app.providers.rerank.bge_rerank  # noqa: F401
     import app.providers.rerank.infinity_rerank  # noqa: F401
 
