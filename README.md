@@ -1,10 +1,10 @@
-# ArcKnowledge AI — Data Plane
+# Incipit AI — Data Plane
 
-多租户知识库系统的数据面服务，负责文档入库（Ingestion）和知识检索（Retrieval）。
+Incipit 多租户知识库系统的数据面服务，负责文档入库（Ingestion）、知识检索（Retrieval）与 RAG 问答。仓库和数据命名空间继续保留历史名称 `arc-knowledge-ai` / `arc_*`。
 
-当前版本 **v6.0**，已完成 Pipeline 框架、全量存储接入、混合检索与 RAG 流式问答、多租户 Hook 系统、OTel 可观测性、K8s 部署配置与多模型路由熔断降级。
+当前主线已完成 **Phase 0–15（v15.x）**：文档入库与删除、智能解析、混合检索、Query Rewrite、Rerank、RAG 流式问答、会话与附件生命周期、三层记忆、知识空间、租户模型路由、限流、语义缓存、用量追踪、可观测性、Admin UI 和可复现的本地容器运行链路均已落地。
 
-**v7.0–v9.0 设计中**：MVP 渐进路线——核心功能补全 → 质量与可靠性 → 可运营。**v10.0+**：Java 控制面。
+项目现阶段进入**收口与真实使用验证**：优先处理类型检查基线、RAG 质量评测、真实浏览器全链路、备份恢复与跨机器复现。Tenant / Group / Space 细粒度授权已有设计但仍待审核；Java 控制面仅在出现真实多用户和独立治理需求时启动。
 
 ---
 
@@ -52,11 +52,11 @@ RawFile
 **Retrieval Pipeline**（单次 HTTP 请求内同步运行）：
 ```
 SearchContext
-  → [QueryRewriteStage]  → SearchContext（扩展查询，当前 pass-through）
+  → [QueryRewriteStage]  → SearchContext（意图识别 + Multi-Query 扩展，失败时降级）
   → [VectorSearchStage]  → SearchContext（填充 vector_hits）
   → [KeywordSearchStage] → SearchContext（填充 keyword_hits）
-  → [RRFFusionStage]     → list[SearchHit]（RRF 融合排序）
-  → [RerankStage]        → list[SearchHit]（精排，当前 pass-through）
+  → [RRFFusionStage]     → SearchContext（填充 ranked_hits）
+  → [RerankStage]        → list[SearchHit]（Infinity/BGE 精排，不可用时回退 RRF）
 ```
 
 ### 2. Provider 抽象
@@ -67,9 +67,11 @@ Stage 描述"做什么"，Provider 描述"怎么做"。通过替换 Provider 切
 |---------|------|------|
 | `unstructured_parser` | Unstructured 库 | 解析 PDF / Word / Excel / HTML |
 | `paddleocr_parser` | PaddleOCR | 扫描件 OCR（置信度 ≥ 0.7） |
+| `smart_parser` | Unstructured + MinerU / PaddleOCR | 文档优先快速解析，空文本或扫描件自动降级 |
 | `openai_embedding` | OpenAI API | 文本向量化（text-embedding-3-small，1536维） |
 | `openai_llm` | OpenAI API | LLM 生成（gpt-4o-mini，流式 + 非流式） |
 | `ollama_llm` | Ollama | 本地 LLM（llama3.2，流式） |
+| `infinity_rerank` | Infinity + BGE-Reranker-v2-m3 | 检索结果精排，健康检查失败时自动降级 |
 
 ### 3. ComponentRegistry
 
@@ -132,7 +134,7 @@ class OpenAILLMProvider(LLMProvider): ...
 ```mermaid
 flowchart TD
     Client(["Client"])
-    API["POST /documents/upload\nX-Tenant-Id: tenant-abc"]
+    API["POST /documents/upload\nBearer JWT + tenant context"]
     MinIO[("MinIO\n原始文件")]
     SVC["DocumentService\n生成 document_id\n触发 Temporal Workflow"]
     RES["202 Accepted\n{ document_id, task_id }"]
@@ -189,22 +191,16 @@ flowchart TD
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/documents/upload` | 上传文档，触发异步入库 |
-| `GET` | `/documents` | 列出所有文档（含状态） |
-| `GET` | `/documents/{id}/status` | 查询处理状态 |
-| `DELETE` | `/documents/{id}` | 删除文档（MinIO / Milvus / ES / PG 四处联动） |
-| `POST` | `/sessions` | 创建会话 |
-| `GET` | `/sessions` | 列出当前用户所有会话 |
-| `GET` | `/sessions/{id}` | 获取会话详情 |
-| `DELETE` | `/sessions/{id}` | 删除会话（CASCADE 删消息） |
-| `GET` | `/sessions/{id}/messages` | 分页获取消息列表 |
-| `GET` | `/search` | 混合检索，返回 hits + chunk 原文 |
-| `POST` | `/chat` | RAG 问答，SSE 流式输出（含 citations 事件） |
-| `GET` | `/health` | 健康检查 |
-| `GET` | `/metrics` | Prometheus metrics 端点 |
-| `POST` | `/admin/models/switch` | 热切换 Ollama 模型 |
-| `DELETE` | `/admin/models/switch` | 重置为默认模型 |
-| `GET` | `/admin/models/current` | 查询当前生效模型 |
+| `POST` | `/auth/register`、`/auth/login`、`/auth/refresh`、`/auth/logout` | 本地账号、JWT 与刷新令牌生命周期 |
+| `GET/POST/DELETE` | `/documents`、`/documents/upload`、`/documents/{id}` | 文档列表、上传、状态、切片预览、重试与跨存储删除 |
+| `GET/POST/DELETE` | `/spaces`、`/spaces/{id}`、`/spaces/{id}/restore` | 知识空间创建、归档与恢复 |
+| `GET/POST/PATCH/DELETE` | `/sessions`、`/sessions/{id}` | 会话创建、读取、重命名、删除、归档、恢复与置顶 |
+| `GET` | `/sessions/{id}/messages` | 获取消息、附件与 Citation 历史 |
+| `POST` | `/chat` | 普通 RAG 问答，SSE 流式输出（含 Citation 事件） |
+| `GET/POST/PUT/PATCH` | `/chat/turns`、`/chat/turns/{id}` | 附件轮次创建、上传、补充、重试、忽略、取消与回答 |
+| `GET/POST` | `/search`、`/search/debug` | 生产混合检索与逐阶段调试结果 |
+| `GET/PUT/POST/DELETE` | `/admin/*` | 真实统计、租户用量与配置、模型定价；开发环境另提供数据重置 |
+| `GET` | `/health`、`/ready`、`/metrics` | 存活、就绪与 Prometheus 指标 |
 
 ---
 
@@ -277,15 +273,25 @@ arc-knowledge-ai/
 | **v4.0** | Hook 系统激活（租户隔离 / 配额 / 幂等 / 可观测性）+ JWT 认证 | ✅ 完成 |
 | **v5.0** | OpenTelemetry + Prometheus + Workflow 版本化 + K8s 部署 | ✅ 完成 |
 | **v6.0** | 多模型路由（ModelHub + 熔断降级 + Ollama 热切换） | ✅ 完成 |
-| **v7.0** | 文档删除（MinIO / Milvus / ES / PG 四处联动） | 📋 设计中 |
-| **v8.0** | 会话持久化（sessions + messages 表，多轮对话管理） | 📋 设计中 |
-| **v9.0** | 检索质量提升（QueryRewrite + Rerank 真实实现） | 📋 设计中 |
-| **v10.0** | 测试补全（Phase 1–5 核心路径覆盖） | 📋 设计中 |
-| **v11.0** | 多租户模型路由重构（三层解析 + TenantConfig 持久化） | 📋 设计中 |
-| **v12.0** | 限流 + 语义缓存 | 📋 设计中 |
-| **v13.0** | 用量追踪（token 计量 + 定价表） | 📋 设计中 |
-| **v14.0** | 可观测性完善（Grafana + 告警）+ 最小 Admin UI | 📋 设计中 |
-| **v15.0+** | Java 控制面（Gateway + Auth + Tenant + RBAC） | 📋 待规划 |
+| **v7.0** | 文档删除（MinIO / Milvus / ES / PG 四处联动） | ✅ 完成 |
+| **v8.0–v8.5** | 会话、三层记忆、知识空间基础表与 Citation 持久化 | ✅ 完成 |
+| **v9.0** | 检索质量提升（Query Rewrite + Infinity/BGE Rerank） | ✅ 完成 |
+| **v10.0** | 核心路径测试补全 | ✅ 完成 |
+| **v11.0** | 多租户模型路由重构（三层解析 + TenantConfig 持久化） | ✅ 完成 |
+| **v12.0** | 租户限流 | ✅ 完成 |
+| **v13.0** | 语义缓存 + 用量与费用追踪 | ✅ 完成 |
+| **v14.0** | 可观测性完善（Grafana / Phoenix / 告警）+ Admin UI | ✅ 完成 |
+| **v15.x** | 知识空间、扫描 PDF 与智能解析、聊天附件与会话运行时 | ✅ 完成 |
+| **下一阶段** | Tenant / Group / Space 细粒度授权 | 📝 设计待审核 |
+| **条件触发** | Java 控制面（Gateway / SSO / 组织治理） | ⏸ 暂不启动 |
+
+### 当前收口重点
+
+1. 建立严格类型检查基线并把 `mypy` 纳入 CI。
+2. 用固定问题集持续评测检索召回、答案忠实度与相关性。
+3. 补充前端到真实后端、真实存储和真实模型的自动化全链路验收。
+4. 完成 PostgreSQL、MinIO、Milvus/etcd、Elasticsearch 与 Temporal 的一致性备份及恢复演练。
+5. 在真实多人使用前审核并实施 Tenant / Group / Space 权限设计。
 
 ---
 

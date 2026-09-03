@@ -2,6 +2,8 @@
 
 > 每个 Phase 完成后更新此文件。
 
+> 当前状态（2026-09-04）：Phase 0–15 已完成，项目进入工程收口与真实使用验证阶段；详见文末“当前收口状态”。
+
 ---
 
 ## Phase 0：Pipeline 框架 + 单文档处理 ✅
@@ -163,11 +165,11 @@ python scripts/start_worker.py
 
 - [x] `infrastructure/milvus/client.py` — ANN 检索（Phase 1 已实现 `search_vectors()`）
 - [x] `infrastructure/elasticsearch/client.py` — BM25 检索（`index_chunks` + `bm25_search` + `delete_by_document`）
-- [x] `pipeline/stages/retrieval/query_rewrite_stage.py` — 查询改写（pass-through，Phase 3 接 LLM）
+- [x] `pipeline/stages/retrieval/query_rewrite_stage.py` — Phase 2 初版为 pass-through，Phase 8 已接入 LLM 意图识别与 Multi-Query 扩展
 - [x] `pipeline/stages/retrieval/vector_search_stage.py` — Milvus ANN 检索
 - [x] `pipeline/stages/retrieval/keyword_search_stage.py` — ES BM25 检索
 - [x] `pipeline/stages/retrieval/rrf_fusion_stage.py` — Reciprocal Rank Fusion 融合
-- [x] `pipeline/stages/retrieval/rerank_stage.py` — Rerank（pass-through，Phase 3 接 RerankProvider）
+- [x] `pipeline/stages/retrieval/rerank_stage.py` — Phase 2 初版为 pass-through，Phase 8 已接入 Infinity/BGE RerankProvider
 - [x] `pipeline/stages/embedding/es_index_stage.py` — 入库时写 ES
 - [x] `pipeline/strategies/retrieval/hybrid_strategy.py` — 混合检索策略
 - [x] `providers/llm/openai_llm.py` — OpenAI LLM（流式 + 非流式）
@@ -189,11 +191,11 @@ GET /search?q=...
   → RetrievalService.search()
   → RAGOrchestrator.retrieve()
       → HybridRetrievalStrategy.build_pipeline()
-      → QueryRewriteStage（pass-through）
+      → QueryRewriteStage（Phase 2 初版 pass-through；当前已由 Phase 8 实现）
       → VectorSearchStage  → Milvus ANN
       → KeywordSearchStage → Elasticsearch BM25
       → RRFFusionStage     → 融合排序
-      → RerankStage        → 精排（pass-through）
+      → RerankStage        → 精排（Phase 2 初版 pass-through；当前已由 Phase 8 实现）
   → ChunkRepository.get_chunks_by_ids() → PostgreSQL
   → 返回 { hits, chunks }
 
@@ -274,7 +276,7 @@ Pipeline 运行
 
 ---
 
-## Phase 5：多模型路由 ✅
+## Phase 5：多模型路由 ✅（历史实现，Phase 10 已重构）
 
 **目标**：LLM Provider 智能路由，支持熔断降级和 Ollama 热切换。
 
@@ -303,7 +305,9 @@ stream_generate() 调用：
   已开始推送 token 后失败      → 直接报错（无法回滚）
 ```
 
-### 新增接口
+### 当时新增接口（当前已移除）
+
+以下全局热切换接口属于 Phase 5 的历史实现，Phase 10 已由请求级模型覆盖、租户配置与 `ModelHub` 三层解析替代，不是当前 API：
 
 | 接口 | 说明 |
 |------|------|
@@ -311,7 +315,7 @@ stream_generate() 调用：
 | `DELETE /admin/models/switch` | 重置为 settings 默认 |
 | `GET /admin/models/current` | 查询当前生效模型 |
 
-### ⚠️ 已知设计局限（MVP-B 待修复）
+### Phase 5 已知设计局限（已在 Phase 10 修复）
 
 | 问题 | 位置 | 影响 |
 |------|------|------|
@@ -1012,9 +1016,40 @@ PaddleOCR 以独立 HTTP 容器服务运行，`PaddleOCRParserProvider` 变为�
 
 ---
 
-## Phase 16+：Java 控制面
+## 当前收口状态（2026-09-04）
 
-**条件**：Python MVP 稳定、有真实多用户接入需求时启动。
+核心产品闭环已经形成，后续工作不再以堆叠功能为目标，而以质量、可恢复性和真实多人使用为触发条件。
+
+### 已验证基线
+
+- 后端 `uv run pytest -q`：368 个测试通过；覆盖 unit、integration 与 runtime contracts。
+- 后端 `uv run ruff check app tests`：通过。
+- 前端 `npm run test`：102 个测试通过。
+- 前端 `npm run build`：类型检查与生产构建通过。
+- 两个仓库均配置 GitHub Actions，执行测试、容器契约或镜像构建。
+
+### 尚未收口
+
+| 优先级 | 项目 | 当前边界 |
+|---|---|---|
+| P0 | Python 严格类型检查 | `mypy --strict` 当前仍有 240 个错误，分布在 66 个文件；CI 尚未执行 mypy |
+| P0 | RAG 质量回归 | 已有检索调试和链路测试，但没有固定真实问题集及 Recall / Faithfulness / Answer Relevancy 回归门禁 |
+| P0 | 备份与恢复 | 本地命名卷可持久化，但没有跨存储一致性快照、定期备份、自动恢复演练与跨机器还原 |
+| P1 | 真实浏览器全链路 | Playwright 当前主要覆盖 Mock API 下的会话归档和置顶；仍需自动化验证真实上传 → 入库 → 检索 → 回答 → 引用 |
+| P1 | 新机器复现 | R0 已证明当前开发机可恢复运行，R0.5 仍需覆盖干净机器、代理/离线模型和完整重启恢复 |
+| 条件触发 | Tenant / Group / Space 授权 | 设计文档已完成但状态仍为“待审核”；仅在真实多人或组织内共享前进入实施 |
+
+### 下一阶段原则
+
+- 个人学习、作品展示或单用户运行：冻结新功能，优先完成 P0/P1 收口项并发布稳定版本。
+- 真实团队使用：先审核 Tenant / Group / Space 权限设计，再实施资源授权；权限完成前不要把“租户隔离”描述为完整组织内授权。
+- Java 控制面不是默认下一步，仅在 SSO、独立治理、高并发网关或多服务控制面成为真实需求时启动。
+
+---
+
+## Phase 16+：Java 控制面（条件触发）
+
+**条件**：Python MVP 稳定，并出现 SSO、独立组织治理、高并发网关或多服务控制面等明确需求时启动。普通多人授权优先在现有 PostgreSQL + FastAPI 架构中落地，不以拆分 Java 服务为前提。
 
 ```
 arc-gateway   → 统一入口、JWT 验证、限流
