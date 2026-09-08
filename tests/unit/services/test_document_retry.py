@@ -6,6 +6,8 @@ import app.services.document_service as service_module
 from app.domain.document import DocumentStatus
 from app.services.document_service import DocumentService, IngestRequest
 
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
+
 
 @pytest.mark.asyncio
 async def test_retry_cleans_partial_indexes_before_new_workflow(monkeypatch) -> None:

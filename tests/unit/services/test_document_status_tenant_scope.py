@@ -11,6 +11,8 @@ import pytest
 import app.services.document_service as document_service
 from app.services.document_service import DocumentService
 
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
+
 
 async def test_get_status_rejects_document_of_other_tenant(monkeypatch):
     class _Repo:

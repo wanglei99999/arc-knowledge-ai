@@ -155,7 +155,9 @@ async def test_run_l1_executes_business_flow_and_cleans_only_created_resources()
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append((request.method, request.url.path))
+        assert "x-tenant-id" not in request.headers
         if request.url.path == "/auth/register":
+            assert "tenant_name" in json.loads(request.content)
             return httpx.Response(409, json={"detail": "already registered"})
         if request.url.path == "/auth/login":
             return httpx.Response(200, json={"access_token": "token"})

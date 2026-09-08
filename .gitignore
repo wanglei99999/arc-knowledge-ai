@@ -8,6 +8,9 @@ venv/
 
 # Test and coverage artifacts
 .pytest_cache/
+.test-tmp-*/
+permission-tests.log
+docs/superpowers/plans/*-review.diff
 .coverage
 .coverage.*
 htmlcov/

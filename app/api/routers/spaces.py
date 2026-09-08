@@ -1,80 +1,34 @@
-from __future__ import annotations
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi import status as http_status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
 
 from app.api.dependencies import UserContext, require_user
-from app.services.space_service import SpaceService
+from app.api.routers.access import CreateSpaceBody, NameBody, service
+from app.services.authorization_service import authorization
 
 router = APIRouter(prefix="/spaces", tags=["spaces"])
 
-_service = SpaceService()
+
+@router.get("")
+async def list_spaces(ctx: UserContext = Depends(require_user)):
+    return await authorization.list_spaces(ctx.tenant_id, ctx.user_id)
 
 
-class CreateSpaceBody(BaseModel):
-    name: str
+@router.post("", status_code=201)
+async def create_space(body: CreateSpaceBody, ctx: UserContext = Depends(require_user)):
+    return await service.create_space(ctx, **body.model_dump(mode="json"))
 
 
-class SpaceOut(BaseModel):
-    space_id: str
-    space_key: str
-    name: str
-    status: str
-    created_by: str | None = None
-
-
-@router.get("", response_model=list[SpaceOut])
-async def list_spaces(ctx: UserContext = Depends(require_user)) -> list[SpaceOut]:
-    spaces = await _service.list_spaces(ctx.tenant_id)
-    return [
-        SpaceOut(
-            space_id=s.space_id,
-            space_key=s.space_key,
-            name=s.name,
-            status=s.status,
-            created_by=s.created_by,
-        )
-        for s in spaces
-    ]
-
-
-@router.post("", response_model=SpaceOut, status_code=201)
-async def create_space(
-    body: CreateSpaceBody,
-    ctx: UserContext = Depends(require_user),
-) -> SpaceOut:
-    space = await _service.create_space(ctx.tenant_id, body.name, ctx.user_id)
-    return SpaceOut(
-        space_id=space.space_id,
-        space_key=space.space_key,
-        name=space.name,
-        status=space.status,
-        created_by=space.created_by,
-    )
+@router.patch("/{space_id}", status_code=204)
+async def rename_space(space_id: UUID, body: NameBody, ctx: UserContext = Depends(require_user)):
+    await service.update_space(ctx, str(space_id), name=body.name)
 
 
 @router.delete("/{space_id}", status_code=204)
-async def delete_space(
-    space_id: str,
-    ctx: UserContext = Depends(require_user),
-) -> None:
-    deleted = await _service.delete_space(ctx.tenant_id, space_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Space not found",
-        )
+async def delete_space(space_id: UUID, ctx: UserContext = Depends(require_user)):
+    await service.update_space(ctx, str(space_id), status="archived")
 
 
 @router.post("/{space_id}/restore", status_code=204)
-async def restore_space(
-    space_id: str,
-    ctx: UserContext = Depends(require_user),
-) -> None:
-    restored = await _service.restore_space(ctx.tenant_id, space_id)
-    if not restored:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Space not found",
-        )
+async def restore_space(space_id: UUID, ctx: UserContext = Depends(require_user)):
+    await service.update_space(ctx, str(space_id), status="active")

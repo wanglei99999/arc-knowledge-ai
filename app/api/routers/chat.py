@@ -70,6 +70,7 @@ async def chat(
         metadata_filters=parse_metadata_filters(body.metadata_filters),
         embedding_provider_name="openai_embedding",
     )
+    await _service.authorize_request(req)
     token_stream = _service.stream_chat(req)
     return StreamingResponse(
         _sse_stream(token_stream),

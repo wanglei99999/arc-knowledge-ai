@@ -19,6 +19,7 @@ from app.infrastructure.minio.client import build_object_key, upload_file
 from app.infrastructure.postgres.repositories.chat_turn_repo import ChatTurnRepository
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
+from app.services.authorization_service import authorization
 from app.services.chat_service import AttachmentAnswerRequest, ChatService
 from app.services.document_service import DocumentService, IngestRequest, IngestResult
 
@@ -110,6 +111,11 @@ class ChatTurnService:
             raise ChatTurnValidationError("问题不能为空")
         self._validate_attachment_list(attachments)
 
+        scope = await authorization.authorize_session(tenant_id, user_id, session_id)
+        if attachments:
+            await authorization.authorize_user(
+                tenant_id, user_id, scope["space_id"], "document.upload"
+            )
         session = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
         if session is None:
             raise ChatTurnNotFoundError("会话不存在")
@@ -130,6 +136,7 @@ class ChatTurnService:
             raise ChatTurnNotFoundError("会话不存在") from exc
 
     async def get_turn(self, *, turn_id: str, tenant_id: str, user_id: str) -> ChatTurnView:
+        await authorization.authorize_session(tenant_id, user_id, turn_id=turn_id)
         turn = await self._turn_repo.get_turn(
             turn_id=turn_id,
             tenant_id=tenant_id,
@@ -215,6 +222,9 @@ class ChatTurnService:
         data: bytes,
     ) -> AttachmentUploadResult:
         turn = await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
+        decision = await authorization.authorize_user(
+            tenant_id, user_id, turn.space_id, "document.upload"
+        )
         attachment = self._find_attachment(turn, attachment_id)
 
         # 重复 PUT 不创建第二份文档，也不再次启动 Workflow。
@@ -239,6 +249,7 @@ class ChatTurnService:
                 mime_type=mime_type,
                 file_path=object_key,
                 file_size=len(data),
+                created_by_membership_id=decision["membership_id"],
             )
             linked = await self._turn_repo.link_document(
                 turn_id=turn_id,
@@ -268,6 +279,7 @@ class ChatTurnService:
         result = await self._document_service.ingest(
             IngestRequest(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 space_id=turn.space_id,
                 file_path=object_key,
                 mime_type=mime_type,
@@ -293,7 +305,9 @@ class ChatTurnService:
         attachment = self._find_attachment(turn, attachment_id)
         if attachment.status is not AttachmentStatus.FAILED or not attachment.document_id:
             raise ChatTurnConflictError("只有入库失败且已上传的附件可以直接重试")
-        return await self._document_service.retry_ingestion(attachment.document_id, tenant_id)
+        return await self._document_service.retry_ingestion(
+            attachment.document_id, tenant_id, user_id=user_id
+        )
 
     async def set_ignored(
         self,
@@ -332,6 +346,7 @@ class ChatTurnService:
     ) -> ChatTurnView:
         self._validate_declaration(attachment)
         turn = await self.get_turn(turn_id=turn_id, tenant_id=tenant_id, user_id=user_id)
+        await authorization.authorize_user(tenant_id, user_id, turn.space_id, "document.upload")
         if turn.processing_status is not TurnProcessingStatus.WAITING_FILES:
             raise ChatTurnConflictError("当前聊天轮次不能补充附件")
         if turn.readiness not in {TurnReadiness.BLOCKED, TurnReadiness.EMPTY}:

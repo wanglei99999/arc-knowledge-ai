@@ -12,10 +12,10 @@ class MemoryRepository:
     async def save(self, memory: Memory) -> None:
         sql = text("""
             INSERT INTO memories
-                (memory_id, tenant_id, user_id, category, content,
+                (memory_id, tenant_id, user_id, space_id, category, content,
                  source_session_id, confidence)
             VALUES
-                (:memory_id, :tenant_id, :user_id, :category, :content,
+                (:memory_id, :tenant_id, :user_id, :space_id, :category, :content,
                  :source_session_id, :confidence)
         """)
         async with get_db() as db:
@@ -25,6 +25,7 @@ class MemoryRepository:
                     "memory_id": memory.memory_id,
                     "tenant_id": memory.tenant_id,
                     "user_id": memory.user_id,
+                    "space_id": memory.space_id,
                     "category": memory.category.value,
                     "content": memory.content,
                     "source_session_id": memory.source_session_id,
@@ -32,14 +33,26 @@ class MemoryRepository:
                 },
             )
 
-    async def update_content(self, memory_id: str, content: str) -> None:
+    async def update_content(
+        self, memory_id: str, content: str, tenant_id: str, user_id: str, space_id: str
+    ) -> None:
         sql = text("""
             UPDATE memories
             SET content = :content, updated_at = NOW()
             WHERE memory_id = :memory_id
+              AND tenant_id=:tenant_id AND user_id=:user_id AND space_id=:space_id
         """)
         async with get_db() as db:
-            await db.execute(sql, {"memory_id": memory_id, "content": content})
+            await db.execute(
+                sql,
+                {
+                    "memory_id": memory_id,
+                    "content": content,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "space_id": space_id,
+                },
+            )
 
     async def delete(self, memory_id: str) -> None:
         sql = text("""
@@ -48,36 +61,48 @@ class MemoryRepository:
         async with get_db() as db:
             await db.execute(sql, {"memory_id": memory_id})
 
-    async def get_by_ids(self, memory_ids: list[str], tenant_id: str, user_id: str) -> list[Memory]:
+    async def get_by_ids(
+        self, memory_ids: list[str], tenant_id: str, user_id: str, space_id: str
+    ) -> list[Memory]:
         if not memory_ids:
             return []
         sql = text("""
-            SELECT memory_id, tenant_id, user_id, category, content,
+            SELECT memory_id, tenant_id, user_id, space_id, category, content,
                    source_session_id, confidence, created_at, updated_at
             FROM memories
             WHERE memory_id = ANY(:ids)
               AND tenant_id = :tenant_id
               AND user_id   = :user_id
+              AND space_id  = :space_id
         """)
         async with get_db() as db:
             result = await db.execute(
-                sql, {"ids": memory_ids, "tenant_id": tenant_id, "user_id": user_id}
+                sql,
+                {
+                    "ids": memory_ids,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "space_id": space_id,
+                },
             )
             rows = result.fetchall()
         return [_row_to_memory(r) for r in rows]
 
-    async def list_by_user(self, tenant_id: str, user_id: str, limit: int = 100) -> list[Memory]:
+    async def list_by_user(
+        self, tenant_id: str, user_id: str, space_id: str, limit: int = 100
+    ) -> list[Memory]:
         sql = text("""
-            SELECT memory_id, tenant_id, user_id, category, content,
+            SELECT memory_id, tenant_id, user_id, space_id, category, content,
                    source_session_id, confidence, created_at, updated_at
             FROM memories
-            WHERE tenant_id = :tenant_id AND user_id = :user_id
+            WHERE tenant_id = :tenant_id AND user_id = :user_id AND space_id = :space_id
             ORDER BY updated_at DESC
             LIMIT :limit
         """)
         async with get_db() as db:
             result = await db.execute(
-                sql, {"tenant_id": tenant_id, "user_id": user_id, "limit": limit}
+                sql,
+                {"tenant_id": tenant_id, "user_id": user_id, "space_id": space_id, "limit": limit},
             )
             rows = result.fetchall()
         return [_row_to_memory(r) for r in rows]
@@ -97,6 +122,7 @@ def _row_to_memory(row) -> Memory:
         memory_id=r["memory_id"],
         tenant_id=r["tenant_id"],
         user_id=r["user_id"],
+        space_id=str(r.get("space_id") or ""),
         category=MemoryCategory(r["category"]),
         content=r["content"],
         source_session_id=r.get("source_session_id"),

@@ -52,12 +52,14 @@ async def test_get_citations_by_message_ids_requires_tenant_scope(monkeypatch) -
 
     monkeypatch.setattr(repo_module, "get_db", fake_get_db)
 
-    grouped = await CitationRepository().get_by_message_ids(["answer-1"], "tenant-1")
+    grouped = await CitationRepository().get_by_message_ids(["answer-1"], "tenant-1", "space-1")
 
     assert grouped["answer-1"][0]["doc_name"] == "contract.pdf"
     sql, params = db.calls[0]
     assert "tenant_id = :tenant_id" in sql
+    assert "space_id = :space_id" in sql
     assert params == {
         "message_ids": ["answer-1"],
         "tenant_id": "tenant-1",
+        "space_id": "space-1",
     }

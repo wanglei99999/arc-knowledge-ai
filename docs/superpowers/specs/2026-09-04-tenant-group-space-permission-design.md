@@ -2,7 +2,9 @@
 
 **日期：** 2026-09-04
 
-**状态：** 待审核
+**状态：** 2026-09-07 更新领域模型与首版实现契约；后端、前端及隔离 PostgreSQL 测试通过，完整运行时端到端验收待完成
+
+**实施修订：** 用户确认没有有效旧数据，本期不做历史数据迁移或所有权回填。使用全新 PostgreSQL 数据库/schema 初始化 v4；脚本检测到旧身份结构会拒绝执行，不自动清空。新语义记忆使用 `arc_memories_v4` 集合，保留旧存储不动。部署前需执行独立数据库集成测试和完整运行时联调，离线测试通过不能代替这些检查。
 
 **范围：** `arc-knowledge-ai` 后端、`arc-knowledge-web` 前端，以及 PostgreSQL、Milvus、Elasticsearch、Redis/语义缓存中的资源访问边界
 
@@ -31,11 +33,11 @@
 7. Tenant 管理员拥有控制面治理权，但不自动拥有私有空间内容读取权；读取内容必须执行显式、填写原因且可审计的接管操作。
 8. 所有权限判断统一经过 `AuthorizationService`。Router、Service、Repository、检索引擎和前端各自承担不同职责，但不能各写一套权限规则。
 
-## 2. 当前状态与问题
+## 2. 实施前基线与问题
 
 ### 2.1 已有基础
 
-当前系统已经具备：
+本方案启动时，系统已经具备：
 
 - PostgreSQL 业务表普遍携带 `tenant_id`；
 - Milvus 使用 `tenant_id` Partition Key，并按 `tenant_id + space_id` 检索；
@@ -48,9 +50,9 @@
 
 这些结构允许在不改动文档与检索核心归属关系的前提下，把授权边界加在 Space 上。
 
-### 2.2 当前缺口
+### 2.2 本次实现解决的缺口
 
-当前实现仍存在以下授权缺口：
+以下为实施前的缺口，保留用于解释设计动机；不是当前代码仍缺少这些能力。当前验收证据见第 24.5 节。
 
 - `users.tenant_id` 把用户身份与租户身份绑定在同一行，无法表示一个用户加入多个 Tenant；
 - 尚无正式 `tenants`、`tenant_memberships`、`groups`、`group_memberships`、`space_grants` 表；
@@ -121,44 +123,70 @@ OpenFGA 或 SpiceDB 负责关系元组和授权判断。模型表达力强，但
 
 ## 6. 领域模型
 
+先区分四个概念：`User` 是全局账号，`TenantMembership` 是组织内身份，`SpaceGrant` 是空间授权事实，`Space` 是内容访问边界。下面按核心关系、授权关系和资源关系分别展示，避免把所有外键挤成一张图。
+
+图中一对多关系允许右侧为零个；每个成员身份恰好连接一个 User 和一个 Tenant。根 Group 没有父组，其余 Group 最多一个父组。关系图描述业务关联，不表示每个实体都是独立 DDD 聚合根，也不表示所有关联都用同一种物理外键保存。
+
+**核心实体与关系**
+
 ```mermaid
 erDiagram
-    USER ||--o{ TENANT_MEMBERSHIP : joins
-    TENANT ||--o{ TENANT_MEMBERSHIP : contains
-    TENANT ||--o{ GROUP : owns
-    GROUP ||--o{ GROUP : parent_of
-    TENANT_MEMBERSHIP ||--o{ GROUP_MEMBERSHIP : participates
-    GROUP ||--o{ GROUP_MEMBERSHIP : contains
-    TENANT ||--o{ SPACE : owns
-    TENANT_MEMBERSHIP ||--o{ SPACE : creates
-    SPACE ||--o{ SPACE_GRANT : authorizes
-    TENANT_MEMBERSHIP o|--o{ SPACE_GRANT : member_subject
-    GROUP o|--o{ SPACE_GRANT : group_subject
-    SPACE ||--o{ DOCUMENT : contains
-    TENANT_MEMBERSHIP ||--o{ DOCUMENT : uploads
-    SPACE ||--o{ SESSION : scopes
-    TENANT_MEMBERSHIP ||--o{ SESSION : owns
-    SESSION ||--o{ MESSAGE : contains
-    MESSAGE ||--o{ MESSAGE_CITATION : has
-    SPACE ||--o{ MESSAGE_CITATION : protects
-    TENANT ||--o{ AUDIT_EVENT : records
+    User ||--o{ TenantMembership : "拥有组织内身份"
+    Tenant ||--o{ TenantMembership : "拥有成员"
+    Tenant ||--o{ Group : "拥有群组"
+    Tenant ||--o{ Space : "拥有空间"
+    TenantMembership ||--o{ GroupMembership : "通过关系加入群组"
+    Group ||--o{ GroupMembership : "包含成员"
+    Group o|--o{ Group : "父组与子组"
+    Space ||--o{ SpaceGrant : "拥有授权记录"
+    Tenant ||--o{ SpaceGrant : "限定授权所属组织"
+
+    User {
+        uuid id "全局账号"
+        string email "全局唯一邮箱"
+        boolean is_active "账号是否有效"
+    }
+    TenantMembership {
+        uuid id "组织内身份"
+        string tenant_id "所属组织"
+        uuid user_id "全局账号"
+        enum role "MEMBER或TENANT_ADMIN"
+        enum status "active或suspended或left"
+    }
+    GroupMembership {
+        string tenant_id "所属组织"
+        uuid group_id "直接加入的群组"
+        uuid tenant_membership_id "组织内身份"
+    }
+    SpaceGrant {
+        uuid id "授权记录"
+        string tenant_id "所属组织"
+        uuid space_id "目标空间"
+        enum subject_type "TENANT或GROUP或MEMBER"
+        uuid group_id "群组主体时填写"
+        uuid tenant_membership_id "个人主体时填写"
+        enum role "VIEWER或EDITOR或MANAGER"
+        datetime revoked_at "撤销时间"
+    }
 ```
+
+加入群组和个人授权均指向 `TenantMembership`，而不是直接指向全局 User。因此同一用户在两个组织中的成员状态、群组和授权独立计算。每条 Grant 都携带 `tenant_id` 以约束归属，但只有 `subject_type=TENANT` 才表示向该组织全体有效成员授权。
 
 ### 6.1 User
 
 `User` 只代表全局登录身份，不再表达“属于哪个组织”。
 
-目标字段：
+首版字段（以下实体字段表以当前 v4 DDL 为准）：
 
 | 字段 | 说明 |
 |---|---|
 | `id UUID PK` | 全局用户 ID |
 | `email` | 规范化后全局唯一；当前本地账号登录标识 |
 | `hashed_password` | 现有本地认证凭据 |
-| `status` | `active / disabled` |
-| `created_at / updated_at` | 审计时间 |
+| `is_active` | 全局账号有效性，布尔值 |
+| `created_at` | 创建时间 |
 
-`users.tenant_id` 在迁移期保留，完成切换后删除。未来接入 OIDC/SAML 时，可把登录身份拆为 `user_identities`，但不属于本期。
+首版新建的 `users` 不包含 `tenant_id`，本期没有新旧字段双写或迁移期。未来接入 OIDC/SAML 时，可把登录身份拆为 `user_identities`，但不属于本期。
 
 ### 6.2 Tenant
 
@@ -166,10 +194,10 @@ erDiagram
 
 | 字段 | 说明 |
 |---|---|
-| `id VARCHAR(64) PK` | 复用现有 tenant_id |
+| `id VARCHAR(64) PK` | 保持链路既有字符串类型；注册时生成组织 ID |
 | `name` | 组织显示名 |
 | `status` | `active / suspended / archived` |
-| `created_at / updated_at` | 审计时间 |
+| `created_at` | 创建时间 |
 
 Tenant 停用时，所有成员与资源访问立即失效；数据保留策略沿用既有租户生命周期设计。
 
@@ -184,8 +212,7 @@ Tenant 停用时，所有成员与资源访问立即失效；数据保留策略�
 | `user_id` | 全局 User |
 | `role` | `TENANT_ADMIN / MEMBER` |
 | `status` | `active / suspended / left` |
-| `joined_at / ended_at` | 生命周期 |
-| `created_at / updated_at` | 审计时间 |
+| `created_at` | 创建时间；状态变化记录于审计事件 |
 
 约束：
 
@@ -205,10 +232,10 @@ Tenant 停用时，所有成员与资源访问立即失效；数据保留策略�
 | `id UUID PK` | Group ID |
 | `tenant_id` | 所属 Tenant |
 | `parent_group_id` | 可空，同 Tenant 的父 Group |
-| `name / description` | 展示信息 |
+| `name` | 群组显示名；首版没有 description 字段 |
 | `status` | `active / archived` |
 | `created_by_membership_id` | 创建成员 |
-| `created_at / updated_at` | 审计时间 |
+| `created_at` | 创建时间 |
 
 `group_memberships`：
 
@@ -245,11 +272,11 @@ Space 仍是租户内知识资源容器。新增或调整：
 
 Space 的数据所有者始终是 Tenant。`created_by_membership_id` 只用于审计，不等同于永久 Owner；实际管理权来自一个或多个 `SpaceGrant(MANAGER)`。
 
-系统应阻止撤销最后一个活动 Space Manager，Tenant Admin 的受审计接管流程除外。
+直接修改或撤销 Grant 时，系统阻止移除最后一个有效 Space Manager。成员停用、移出群组或群组变化仍可导致管理者缺失；这种治理情形由 Tenant Admin 显式接管处理，不能为了保留管理者而继续允许已停用成员访问。
 
 ### 6.6 SpaceGrant
 
-`SpaceGrant` 是租户内资源权限的唯一事实来源。
+`SpaceGrant` 是空间角色授予的事实来源。有效权限还依赖 User、Tenant、TenantMembership、Group 的状态、群组关系和 Space 状态，不能只查 Grant 就放行。
 
 | 字段 | 说明 |
 |---|---|
@@ -260,7 +287,7 @@ Space 的数据所有者始终是 Tenant。`created_by_membership_id` 只用于�
 | `group_id` | `GROUP` 主体时填写 |
 | `tenant_membership_id` | `MEMBER` 主体时填写 |
 | `role` | `VIEWER / EDITOR / MANAGER` |
-| `source` | `template / direct / migration / admin_takeover` |
+| `source` | 首版使用 `template / direct / admin_takeover`；不生成 migration 授权 |
 | `created_by_membership_id` | 授权者 |
 | `created_at / revoked_at` | 生命周期；撤销采用时间戳保留审计 |
 
@@ -279,7 +306,7 @@ Space 的数据所有者始终是 Tenant。`created_by_membership_id` 只用于�
 
 ### 6.7 Document 及派生内容
 
-`documents` 新增 `created_by_membership_id UUID NULL`。迁移完成后，新文档必须填写；旧数据允许暂时为空，空 Owner 文档只有 Manager 能执行 Owner 限定操作。
+`documents.created_by_membership_id` 为 `UUID NOT NULL`，并与 `tenant_id` 共同引用同组织的 TenantMembership。本期没有旧文档 Owner 回填或可空过渡阶段。创建者只参与 EDITOR 删除、重试等动作条件，不构成独立文件 ACL。
 
 以下内容都受 Document 所属 Space 的 `VIEWER` 权限保护：
 
@@ -293,6 +320,73 @@ Space 的数据所有者始终是 Tenant。`created_by_membership_id` 只用于�
 - Session/Message 中来自该 Space 的历史内容；
 - 从会话提取的空间来源记忆；
 - 语义缓存中的回答和引用。
+
+### 6.8 授权记录与角色能力
+
+一条授权表达：“在当前组织，把某个 Space 的某种角色授予一个主体”。三种主体互斥，同一条 Grant 只能选择一种。
+
+```mermaid
+flowchart TB
+    T["组织全体有效成员<br/>TENANT"] -->|三选一| Grant
+    G["指定群组<br/>GROUP"] -->|三选一| Grant
+    M["指定组织内身份<br/>MEMBER"] -->|三选一| Grant
+    Grant["SpaceGrant<br/>主体 + 空间 + 角色"] --> S["Space 目标空间"]
+    Grant --> R["空间角色<br/>VIEWER / EDITOR / MANAGER"]
+    R --> C["固定能力规则<br/>阅读、上传、删除、重试、管理授权"]
+```
+
+两套 role 的作用域不同：`TenantMembership.role` 控制组织治理；`SpaceGrant.role` 控制具体空间。TENANT_ADMIN 不会自动转换成所有 Space 的 MANAGER。角色与 capability 是代码中的固定规则，不是额外的 Role 实体或可编辑权限表。
+
+### 6.9 多组织、多群组的权限示例
+
+```mermaid
+flowchart TB
+    U["User：小林"] --> A["A 公司的 TenantMembership"]
+    U --> B["B 组织的 TenantMembership<br/>独立计算权限"]
+    A --> All["A 公司全体成员"]
+    A --> Dev["研发部成员关系"]
+    A --> Project["项目组成员关系"]
+    All -->|组织授权 VIEWER| S["项目知识空间"]
+    Dev -->|群组授权 EDITOR| S
+    Project -->|群组授权 VIEWER| S
+    S --> Result["有效角色 EDITOR<br/>取当前命中授权的最高角色"]
+    Result --> Read["阅读、搜索、问答"]
+    Result --> Upload["上传文件"]
+    Result --> Own["删除或重试本人创建的文件"]
+```
+
+通过成员关系、群组祖先和主体匹配寻找有效授权，是本项目的 ReBAC 部分；由角色映射能力，是 RBAC 部分。撤销研发部的 EDITOR 后，小林仍由其他路径获得 VIEWER；只有所有可读授权路径都失效，才完全失去空间访问权。成员身份整体停用则使该组织内全部路径失效。
+
+### 6.10 资源与派生内容的关系
+
+```mermaid
+flowchart TB
+    S["Space<br/>文件访问的授权边界"] -->|包含| D["Document 文件"]
+    D -->|拆分| C["DocumentChunk 切片"]
+    S -->|会话固定关联一个空间| Session["Session 聊天会话"]
+    Owner["组织内用户身份"] -->|拥有| Session
+    Session --> Msg["Message 消息"]
+    Msg --> Att["Attachment 附件关系"]
+    Att -->|上传完成后关联| D
+    Msg --> Cite["Citation 引用快照"]
+    Cite -.->|记录来源标识| C
+    S -->|限定空间范围| Memory["Memory 语义记忆"]
+    Owner -->|限定用户范围| Memory
+    Session -.->|可作为来源| Memory
+```
+
+- Document 和 Chunk 的读取权限来自 Space，不单独授权；共享空间不意味着共享其中所有用户的聊天记录。
+- Session 必须同时满足“属于当前用户”与“当前仍可读原 Space”。物理字段用 `(tenant_id, user_id)` 对应组织成员身份，不另存 `tenant_membership_id`。
+- Citation 保存来源 ID 与内容快照；文档、切片来源 ID 不设外键，以便原文删除后保留历史快照。历史读取仍受当前会话与空间授权保护。
+- Memory 按 `tenant_id + user_id + space_id` 隔离。来源会话删除可以清空来源链接，不能把记忆转为全租户共享。
+
+**数据库约束与业务授权分工：** 复合外键保证文档与创建者、切片与文档、会话与组织成员、消息与会话、附件与文档、引用与消息、记忆与来源会话不会跨租户错误关联。附件还校验其声明的空间与所关联文档一致。会话、附件、引用、记忆之间完整的同空间业务规则仍由服务层保证；复合外键不等同于当前用户有权读取，也不能替代授权服务。
+
+### 6.11 事务与审计边界
+
+本图不是“一张表一个聚合”的 DDD 划分。当前实现通过应用服务组织事务：成员、群组和授权变更先锁定 Tenant，再校验当前身份；涉及空间治理时锁定 Space。Grant 变更、最后管理者校验与 AuditEvent 在同一事务内提交，管理员接管也必须把授权与原因审计一并提交。
+
+AuditEvent 记录“谁在什么组织、对哪个资源做了什么”，用于追溯；它不是新的授权来源。后续若引入正式聚合模型，应围绕这些一致性要求设计，不能仅按表名决定聚合边界。
 
 ## 7. Space 创建预设
 
@@ -402,17 +496,18 @@ flowchart TD
 
 ### 9.3 服务接口
 
-业务代码只依赖稳定接口，不直接查询 Grant 表：
+当前业务服务使用下列实际接口；关系管理写入由 AccessManagementService 在事务内处理：
 
 ```python
-AuthorizationService.authorize(context, action, resource)
-AuthorizationService.can(context, action, resource) -> bool
-AuthorizationService.effective_space_access(context, space_id)
-AuthorizationService.list_accessible_space_ids(context, minimum_role)
-AuthorizationService.require_tenant_admin(context)
+AuthorizationService.context(tenant_id, user_id, membership_id=None)
+AuthorizationService.authorize_user(tenant_id, user_id, space_id, action)
+AuthorizationService.authorize_document(tenant_id, user_id, document_id, action="space.read")
+AuthorizationService.authorize_session(tenant_id, user_id, session_id=None, *, turn_id=None)
+AuthorizationService.list_spaces(tenant_id, user_id, *, include_archived=False)
+AuthorizationService.require_admin(tenant_id, user_id)
 ```
 
-`authorize()` 成功返回可复用的 `AccessDecision`，包含 `effective_role`、`capabilities`、命中的授权来源摘要；失败抛出统一领域错误。业务 Service 使用决定结果，Router 只映射 HTTP 状态。
+空间授权成功返回包含 `effective_role`、`capabilities`、`permission_sources` 和当前 `membership_id` 的决定字典；不是已定义的 AccessDecision 持久化实体。文档检查附带文档归属，会话检查返回通过校验的会话范围；失败抛出统一 AuthorizationError，由 HTTP 边界映射状态。上述签名省略部分可选参数，完整契约以服务代码为准。
 
 ### 9.4 检查位置
 
@@ -647,29 +742,30 @@ GET  /me/context
 ### 18.2 Tenant 与 Group 控制面
 
 ```text
-GET/PATCH         /tenant/members
-POST              /tenant/members/{membership_id}/suspend
+GET/POST          /tenant/members
+PATCH             /tenant/members/{membership_id}
 GET/POST          /groups
 PATCH/DELETE      /groups/{group_id}
-GET/POST/DELETE   /groups/{group_id}/members
+GET/POST          /groups/{group_id}/members
+DELETE            /groups/{group_id}/members/{membership_id}
 ```
 
-第一版这些接口均要求 `TENANT_ADMIN`。
+第一版这些接口均要求 `TENANT_ADMIN`；成员停用通过 PATCH 的 status 表达。另有 `GET /tenant/directory` 向活动成员提供用于分享选择的组织内精简通讯录，不返回私有空间内容。
 
 ### 18.3 Space 与 Grant
 
 ```text
 GET/POST          /spaces
-GET/PATCH/DELETE  /spaces/{space_id}
+PATCH/DELETE      /spaces/{space_id}
 POST              /spaces/{space_id}/restore
-GET/POST          /spaces/{space_id}/grants
-PATCH/DELETE      /spaces/{space_id}/grants/{grant_id}
-GET               /admin/spaces
-POST              /admin/spaces/{space_id}/takeover
-DELETE            /admin/spaces/{space_id}/takeover
+GET/PUT           /spaces/{space_id}/grants
+DELETE            /spaces/{space_id}/grants/{grant_id}
+GET               /tenant/spaces
+POST              /tenant/spaces/{space_id}/takeover
+GET               /tenant/audit
 ```
 
-创建 Space 请求包含一次性 `preset` 与相应 Group 参数；`preset` 不保存为授权依据。
+创建 Space 请求包含一次性 `preset` 与相应 Group 参数；`preset` 不保存为授权依据。PUT 按空间与主体替换有效授权；撤销接管使用通用 Grant 撤销接口，遵守相同审计与最后管理者保护，没有独立的 DELETE takeover 路由。Tenant Admin 可以查看授权配置；修改授权仍需实际空间管理权，组织全体授权还需 Tenant Admin 身份。
 
 `SpaceOut` 增加：
 
@@ -756,60 +852,40 @@ documents (tenant_id, space_id, created_by_membership_id)
 
 Grant 修改、最后 Manager 校验和 AuditEvent 写入同一数据库事务。授权读取默认使用 READ COMMITTED；权限撤销对后续请求立即生效。未来若加 Redis 缓存，必须引入 Tenant/Member 权限版本并在 Membership、Group、Grant 变化时统一失效，不能只靠 TTL 猜测。
 
-## 22. 数据迁移与发布
+## 22. 全新初始化与发布
 
-迁移采用扩展—回填—切换—收紧，不做一次性破坏性重建。
+用户已确认没有有效旧数据，本期采用全新初始化。早期的扩展、回填、双写、影子授权和兼容性管理员提升方案已取消，不作为实施步骤保留。
 
 ```mermaid
-flowchart LR
-    A[新增表与 nullable 字段] --> B[回填 Tenant 与 Membership]
-    B --> C[为现有 Space 生成初始 Grant]
-    C --> D[新旧字段双写与影子授权]
-    D --> E[切换认证与强制授权]
-    E --> F[收紧约束并移除旧字段]
+flowchart TD
+    A["配置全新隔离数据库或 schema"] --> B["执行 v4 DDL"]
+    B --> C["注册全局账号与新 Tenant"]
+    C --> D["事务内创建首位管理员身份"]
+    D --> E["初始化公共 VIEWER 与个人 MANAGER 空间"]
+    E --> F["添加已注册用户为组织成员"]
+    F --> G["配置群组与空间授权"]
+    G --> H["验证文件、搜索、聊天和撤权完整链路"]
 ```
 
-### 22.1 迁移前检查
+### 22.1 初始化约束
 
-- 枚举所有现有 `tenant_id`；
-- 检查规范化 email 是否跨 Tenant 重复；
-- 检查 `spaces.created_by`、`documents.created_by` 是否能映射到 User；
-- 检查孤立 Space、Document、Session 与无效 UUID；
-- 检查现有 Tenant 是否至少有一个活动 User。
+- 显式配置目标数据库/schema，在后端运行 `.venv\\Scripts\\python.exe -m scripts.migrate`。
+- 检测到旧 `users.tenant_id` 会拒绝执行；不自动删表、回填所有权或清理对象/向量存储。
+- 新建 User 无 tenant_id；Document 创建者从第一天起为 NOT NULL，并受同租户复合外键约束。
+- 新语义记忆写入 `arc_memories_v4`，既有集合保持不动。
+- CREATE TABLE IF NOT EXISTS 可重复执行，但不会自动修补已有 v4 表的所有字段和约束。开发期间若已初始化较早版本 v4，必须另行核对差异；不能把相同版本号当成结构完全一致。
 
-跨 Tenant 相同 email 是把 User 全局化前的阻塞项：密码哈希与身份确认一致时可合并 User 并保留多个 Membership；无法自动确认时生成迁移报告，人工选择合并或改邮箱，不能静默合并。
+### 22.2 初始身份与空间
 
-### 22.2 初始回填
+注册事务创建新 User、Tenant、首位 TENANT_ADMIN、公共空间和个人空间。公共空间授予 Tenant 全体 VIEWER，创建者获得 MANAGER；个人空间只向本人组织身份授予 MANAGER。不能通过传入任意租户 Header 加入已有组织。
 
-为保持现有用户能继续使用已有共享空间：
+已有组织的管理员按邮箱添加已注册用户，生成新的 TenantMembership 和该成员个人空间；该用户在原组织的身份与权限不受影响。首版不提供未注册用户邀请流程。
 
-- 从所有业务表的 distinct `tenant_id` 创建 Tenant；
-- 每个现有 `users` 行创建对应 TenantMembership；
-- 现有系统没有租户内角色边界，因此迁移时将现有活动用户暂设为 `TENANT_ADMIN`，明确记录为兼容迁移结果，随后由管理员收敛角色；
-- 每个现有活动 Space 创建 Tenant `EDITOR` Grant，使原租户成员继续列表、上传、搜索和聊天；
-- 可映射的 Space 创建者获得直接 `MANAGER` Grant；
-- 无法映射创建者的 Space，把一个确定的迁移 Tenant Admin 指定为 Manager，并写 AuditEvent；
-- `created_by` 可映射时回填 `created_by_membership_id`，不可映射保持 NULL；
-- 默认空间不因迁移自动成为“所有成员可管理”，只有 Tenant EDITOR + 显式 Manager。
+### 22.3 验收与发布边界
 
-该回填会有意收紧“任意租户用户可删除任意文档”的旧行为：普通迁移成员只能删除自己创建的文档，Manager 才能删除全部。
+隔离 PostgreSQL 集成测试只创建并删除随机测试 schema，不初始化或清空 public。已完成的测试证据见第 24.5 节。正式使用前仍需串联 API、Worker、前端、对象存储、检索引擎、缓存和 LLM，验证真实文件与撤权流程。
 
-### 22.3 影子授权
-
-在正式拒绝请求前，先运行短期影子模式：
-
-- 现有请求仍按旧逻辑执行；
-- 新 AuthorizationService 同时计算决定；
-- 记录“旧逻辑允许、新逻辑拒绝”的计数与资源类型，不记录正文；
-- 修复未覆盖入口和错误回填后再开启强制模式。
-
-影子模式只用于发布验证，不能长期保留成绕过开关。
-
-### 22.4 切换与回退
-
-切换顺序：身份上下文 → Space 列表 → Document → Search/RAG → Session/Citation → 管理界面。每一步通过后再推进。
-
-回退只回退应用读取路径到旧逻辑，新增表和回填数据保留；不执行破坏性 DROP。正式强制授权后产生的新私有数据不能回退到会让租户全员可见的旧版本，因此生产切换前必须完成备份与发布闸门，切换后回退需要关闭业务写入或保持新版授权代理。
+本次实现未执行业务数据库初始化，也未提交、推送或部署。发布回退必须保留新授权边界；旧版租户全员可见逻辑不适用于已经产生私有内容的新系统。
 
 ## 23. 与既有 ADR 的关系
 
@@ -871,15 +947,28 @@ flowchart LR
 - Tenant Admin 只在管理页看到私有 Space 元数据，接管后才可进入内容；
 - 接管对话框强制原因并显示审计提示。
 
-## 25. 可观测性与安全指标
+### 24.5 当前验收证据（2026-09-07）
 
-新增低基数指标：
+| 检查 | 已记录结果 | 边界 |
+|---|---|---|
+| 后端完整测试 | 444 passed，2 条既有 SWIG 警告 | 包含 6 项真实 PostgreSQL 用例 |
+| 最终数据库约束回归 | 6 passed | 最后一轮复合外键补丁后重新通过 |
+| 前端测试 | 121 passed | 单元与组件测试 |
+| 前端生产构建 | vue-tsc 与 Vite 通过 | 不代表浏览器端到端完成 |
+| Python 编译与差异检查 | compileall、git diff --check 通过 | 静态检查 |
+| Ruff | 忽略 E501 后通过 | 未忽略时仍有行宽问题 |
+| 完整运行时与浏览器联调 | 待完成 | 对象存储、向量/关键词检索、Redis、Temporal、LLM 串联 |
+
+以上是实现阶段已记录的证据，本次领域模型文档更新未重新运行业务测试。详细报告见 [后端验收报告](../plans/backend-report.md) 和 [前端验收报告](../plans/frontend-report.md)，操作说明见 [首版实现与验收](../../space-permissions-implementation.md)。
+
+## 25. 可观测性与安全指标（后续补齐）
+
+下列低基数指标是设计目标，尚不作为本版已完成能力：
 
 ```text
 authorization_decisions_total{action,result,subject_type}
 authorization_query_duration_seconds{operation}
 admin_takeovers_total{result}
-permission_shadow_mismatches_total{resource_type,action}
 ```
 
 指标不得使用 tenant_id、user_id、space_id 作为默认标签，以免高基数。结构化日志可携带这些 ID，但不得包含文档正文、查询全文、Prompt、Token 或密码。
@@ -902,7 +991,7 @@ permission_shadow_mismatches_total{resource_type,action}
 - 多条 Grant 按并集生效，无 DENY 歧义；
 - 跨 Tenant IDOR 在 API、Service、Repository 与检索过滤层均被阻止；
 - 权限与成员变化产生完整 AuditEvent；
-- 迁移保留现有数据和已有 Space 可用性，且不会把新私有数据暴露给旧版本；
+- 全新初始化建立完整约束，旧身份结构被明确拒绝，不自动清空或回填业务数据；
 - 后端单元/集成测试与前端单元/E2E 测试覆盖权限矩阵中的每条路径。
 
 ## 27. 后续演进

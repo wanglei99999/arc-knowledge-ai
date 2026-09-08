@@ -10,6 +10,7 @@ from app.infrastructure.postgres.repositories.citation_repo import CitationRepos
 from app.infrastructure.postgres.repositories.memory_repo import MemoryRepository
 from app.infrastructure.postgres.repositories.session_repo import SessionRepository
 from app.infrastructure.postgres.repositories.space_repo import SpaceRepository
+from app.services.authorization_service import authorization
 
 
 class SessionBusyError(Exception):
@@ -68,9 +69,11 @@ class SessionService:
         title: str | None = None,
         space_id: str | None = None,
     ) -> Session:
+        await authorization.authorize_user(tenant_id, user_id, space_id, "space.read")
         return await self._session_repo.create(tenant_id, user_id, title, space_id)
 
     async def get(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         return await self._session_repo.get_by_id(session_id, tenant_id, user_id)
 
     async def list(
@@ -81,17 +84,24 @@ class SessionService:
         offset: int = 0,
         space_id: str | None = None,
     ) -> SessionListResult:
-        sessions = await self._session_repo.list(tenant_id, user_id, limit, offset, space_id)
-        return SessionListResult(sessions=sessions, total=len(sessions))
+        spaces = await authorization.list_spaces(tenant_id, user_id)
+        allowed = [s["space_id"] for s in spaces if not space_id or s["space_id"] == space_id]
+        sessions = await self._session_repo.list(
+            tenant_id, user_id, limit, offset, space_id, allowed_space_ids=allowed
+        )
+        total = await self._session_repo.count_visible(tenant_id, user_id, allowed)
+        return SessionListResult(sessions=sessions, total=total)
 
     async def delete(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         """删除会话及其关联记忆"""
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         deleted = await self._session_repo.delete(session_id, tenant_id, user_id)
         if deleted:
             await self._memory_repo.delete_by_session(session_id)
         return deleted
 
     async def archive(self, session_id: str, tenant_id: str, user_id: str) -> bool:
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         owned = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
         if owned is None:
             return False
@@ -100,6 +110,7 @@ class SessionService:
         return await self._session_repo.archive(session_id, tenant_id, user_id)
 
     async def restore(self, session_id: str, tenant_id: str, user_id: str) -> bool:
+        await authorization.authorize_session(tenant_id, user_id, session_id, allow_archived=True)
         owned = await self._session_repo.get_by_id(session_id, tenant_id, user_id)
         if owned is None:
             return False
@@ -113,9 +124,11 @@ class SessionService:
         return await self._session_repo.restore(session_id, tenant_id, user_id)
 
     async def pin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         return await self._session_repo.pin(session_id, tenant_id, user_id)
 
     async def unpin(self, session_id: str, tenant_id: str, user_id: str) -> Session | None:
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         return await self._session_repo.unpin(session_id, tenant_id, user_id)
 
     async def rename(
@@ -125,6 +138,7 @@ class SessionService:
         user_id: str,
         title: str,
     ) -> Session | None:
+        await authorization.authorize_session(tenant_id, user_id, session_id)
         return await self._session_repo.rename(session_id, tenant_id, user_id, title)
 
     async def list_archived(
@@ -136,6 +150,7 @@ class SessionService:
         limit: int,
         offset: int,
     ) -> ArchivedSessionPage:
+        spaces = await authorization.list_spaces(tenant_id, user_id, include_archived=True)
         items, total = await self._session_repo.list_archived(
             tenant_id,
             user_id,
@@ -143,19 +158,21 @@ class SessionService:
             space_id=space_id,
             limit=limit,
             offset=offset,
+            allowed_space_ids=[s["space_id"] for s in spaces],
         )
         return ArchivedSessionPage(items=items, total=total)
 
     async def get_messages(
         self, session_id: str, tenant_id: str, user_id: str, limit: int = 50
     ) -> list[SessionMessageView]:
+        scope = await authorization.authorize_session(tenant_id, user_id, session_id)
         messages = await self._session_repo.get_last_messages(
             session_id, tenant_id, user_id, n=limit
         )
         message_ids = [message.message_id for message in messages]
         assistant_ids = [message.message_id for message in messages if message.role == "assistant"]
         citations_map, attachments_map = await asyncio.gather(
-            self._citation_repo.get_by_message_ids(assistant_ids, tenant_id),
+            self._citation_repo.get_by_message_ids(assistant_ids, tenant_id, scope["space_id"]),
             self._attachment_repo.get_by_message_ids(message_ids, tenant_id),
         )
         return [

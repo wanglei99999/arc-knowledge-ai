@@ -6,13 +6,25 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.middleware.rate_limit import RateLimitMiddleware
-from app.api.routers import admin, auth, chat, chat_turn, document, ops, search, session, spaces
+from app.api.routers import (
+    access,
+    admin,
+    auth,
+    chat,
+    chat_turn,
+    document,
+    ops,
+    search,
+    session,
+    spaces,
+)
 from app.config.settings import settings
+from app.domain.authorization import AuthorizationError
 from app.infrastructure.postgres.client import dispose
 from app.infrastructure.redis.client import close as redis_close
 from app.infrastructure.redis.semantic_cache import cache as _semantic_cache
@@ -96,6 +108,8 @@ if settings.otel_enabled:
 
 # 注册路由
 app.include_router(auth.router)
+app.include_router(auth.me_router)
+app.include_router(access.router)
 app.include_router(document.router)
 app.include_router(search.router)
 app.include_router(chat.router)
@@ -104,6 +118,13 @@ app.include_router(admin.router)
 app.include_router(session.router)
 app.include_router(spaces.router)
 app.include_router(ops.router)
+
+
+@app.exception_handler(AuthorizationError)
+async def authorization_error_handler(request, exc: AuthorizationError):
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": {"code": exc.code, "message": str(exc)}}
+    )
 
 
 @app.get("/metrics", tags=["ops"], include_in_schema=False)

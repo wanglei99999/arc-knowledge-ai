@@ -67,6 +67,8 @@ class SessionRepository:
         limit: int = 20,
         offset: int = 0,
         space_id: str | None = None,
+        *,
+        allowed_space_ids: list[str],
     ) -> list[Session]:
         where_extra = "AND space_id = :space_id" if space_id else ""
         sql = text(f"""
@@ -76,6 +78,7 @@ class SessionRepository:
             WHERE tenant_id = :tenant_id
               AND user_id = :user_id
               AND archived_at IS NULL
+              AND space_id = ANY(CAST(:allowed_space_ids AS uuid[]))
               {where_extra}
             ORDER BY pinned_at DESC NULLS LAST, updated_at DESC, session_id DESC
             LIMIT :limit OFFSET :offset
@@ -89,10 +92,23 @@ class SessionRepository:
                     "limit": limit,
                     "offset": offset,
                     "space_id": space_id,
+                    "allowed_space_ids": allowed_space_ids,
                 },
             )
             rows = result.fetchall()
         return [_row_to_session(r) for r in rows]
+
+    async def count_visible(
+        self, tenant_id: str, user_id: str, allowed_space_ids: list[str]
+    ) -> int:
+        async with get_db() as db:
+            result = await db.execute(
+                text("""SELECT COUNT(*) FROM sessions
+                WHERE tenant_id=:tenant_id AND user_id=:user_id AND archived_at IS NULL
+                AND space_id=ANY(CAST(:spaces AS uuid[]))"""),
+                {"tenant_id": tenant_id, "user_id": user_id, "spaces": allowed_space_ids},
+            )
+            return int(result.scalar_one())
 
     async def archive(self, session_id: str, tenant_id: str, user_id: str) -> bool:
         sql = text("""
@@ -216,15 +232,19 @@ class SessionRepository:
         space_id: str | None,
         limit: int,
         offset: int,
+        *,
+        allowed_space_ids: list[str],
     ) -> tuple[list[ArchivedSession], int]:
         filters = [
             "s.tenant_id = :tenant_id",
             "s.user_id = :user_id",
             "s.archived_at IS NOT NULL",
+            "s.space_id = ANY(CAST(:allowed_space_ids AS uuid[]))",
         ]
         params: dict[str, object] = {
             "tenant_id": tenant_id,
             "user_id": user_id,
+            "allowed_space_ids": allowed_space_ids,
         }
         if query:
             filters.append("(LOWER(s.title) LIKE :query OR LOWER(sp.name) LIKE :query)")

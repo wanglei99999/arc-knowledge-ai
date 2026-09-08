@@ -13,6 +13,7 @@ from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.pipeline.core.context import ProcessingContext, QuotaSnapshot, TenantConfig
 from app.pipeline.core.registry import registry
 from app.providers.base import ChatMessage
+from app.services.authorization_service import authorization
 from app.services.tenant_config_service import TenantConfigService
 
 _FAKE_QUOTA = QuotaSnapshot(
@@ -90,6 +91,8 @@ def _to_debug_hits(
 ) -> list[dict[str, Any]]:
     out = []
     for h in hits:
+        if h.chunk_id not in content_map:
+            continue
         meta = content_map.get(h.chunk_id, {})
         out.append(
             {
@@ -119,7 +122,11 @@ class DebugRetrievalService:
             trace_id=str(uuid.uuid4()),
         )
 
-    async def debug_search(self, req: DebugSearchRequest, tenant_id: str) -> dict:
+    async def debug_search(
+        self, req: DebugSearchRequest, tenant_id: str, *, user_id: str = ""
+    ) -> dict:
+        await authorization.require_admin(tenant_id, user_id)
+        await authorization.authorize_user(tenant_id, user_id, req.space_id, "space.read")
         base_config = await self._tenant_config_svc.get_or_default(tenant_id)
         config = dataclasses.replace(
             base_config,
@@ -172,7 +179,7 @@ class DebugRetrievalService:
         # 批量拉取 chunk 原文（vector + keyword + final 的并集）
         t = time.monotonic()
         all_ids = _unique_ids(search_ctx.vector_hits, search_ctx.keyword_hits, final_hits)
-        chunks = await self._chunk_repo.get_chunks_by_ids(all_ids, tenant_id)
+        chunks = await self._chunk_repo.get_chunks_by_ids(all_ids, tenant_id, req.space_id)
         content_map: dict[str, dict] = {c["chunk_id"]: c for c in chunks}
         timings["chunk_fetch"] = (time.monotonic() - t) * 1000
 

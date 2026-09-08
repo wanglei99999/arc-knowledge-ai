@@ -195,6 +195,7 @@ class MemoryExtractor:
                 session_id=session_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
+                space_id=session.space_id,
                 last_n=settings.memory_last_n,
                 llm=llm,
                 embed=embed,
@@ -239,6 +240,7 @@ class MemoryExtractor:
         session_id: str,
         tenant_id: str,
         user_id: str,
+        space_id: str,
         last_n: int,
         llm: LLMProvider,
         embed: EmbeddingProvider,
@@ -265,6 +267,7 @@ class MemoryExtractor:
                 session_id=session_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
+                space_id=space_id,
                 embed=embed,
                 ctx=ctx,
             )
@@ -275,6 +278,7 @@ class MemoryExtractor:
         session_id: str,
         tenant_id: str,
         user_id: str,
+        space_id: str,
         embed: EmbeddingProvider,
         ctx: ProcessingContext,
     ) -> None:
@@ -293,6 +297,7 @@ class MemoryExtractor:
             query_embedding=embedding,
             tenant_id=tenant_id,
             user_id=user_id,
+            space_id=space_id,
             top_k=1,
             score_threshold=settings.memory_update_threshold,
         )
@@ -300,8 +305,8 @@ class MemoryExtractor:
         if hits:
             # UPDATE：相似记忆已存在，更新内容
             memory_id = hits[0]["memory_id"]
-            await self._memory_repo.update_content(memory_id, content)
-            await upsert_memory_vector(memory_id, user_id, tenant_id, embedding)
+            await self._memory_repo.update_content(memory_id, content, tenant_id, user_id, space_id)
+            await upsert_memory_vector(memory_id, user_id, tenant_id, embedding, space_id)
         else:
             # ADD：新记忆
             memory = Memory(
@@ -311,9 +316,10 @@ class MemoryExtractor:
                 category=category,
                 content=content,
                 source_session_id=session_id,
+                space_id=space_id,
             )
             await self._memory_repo.save(memory)
-            await upsert_memory_vector(memory.memory_id, user_id, tenant_id, embedding)
+            await upsert_memory_vector(memory.memory_id, user_id, tenant_id, embedding, space_id)
 
 
 def _parse_facts(raw: str) -> list[dict]:

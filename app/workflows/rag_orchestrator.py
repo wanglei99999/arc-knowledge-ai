@@ -130,7 +130,9 @@ class RAGOrchestrator:
         # 从 PostgreSQL 拉取 chunk 文本
         chunk_ids = [h.chunk_id for h in hits]
         with traced_block("chunk.fetch") as span:
-            chunks = await self._chunk_repo.get_chunks_by_ids(chunk_ids, tenant_id)
+            chunks = await self._chunk_repo.get_chunks_by_ids(chunk_ids, tenant_id, space_id)
+            hydrated = {chunk["chunk_id"] for chunk in chunks}
+            hits = [hit for hit in hits if hit.chunk_id in hydrated]
             try:
                 # 带文本的最终文档列表挂在这——文本真实存在之处(helper 复用 _DOC_LIMIT/截断)
                 span.set_attributes(chunk_doc_attrs(chunks))

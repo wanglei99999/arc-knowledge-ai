@@ -67,7 +67,9 @@ async def test_active_list_filters_archived_sessions(monkeypatch) -> None:
     db = _FakeDB([_Result(rows=[])])
     _patch_session(monkeypatch, db)
 
-    await SessionRepository().list("tenant-1", "user-1", space_id="space-1")
+    await SessionRepository().list(
+        "tenant-1", "user-1", space_id="space-1", allowed_space_ids=["space-1"]
+    )
 
     sql, params = db.calls[0]
     assert "archived_at is null" in sql
@@ -81,7 +83,9 @@ async def test_active_list_orders_recently_pinned_sessions_first(monkeypatch) ->
     db = _FakeDB([_Result(rows=[])])
     _patch_session(monkeypatch, db)
 
-    await SessionRepository().list("tenant-1", "user-1", space_id="space-1")
+    await SessionRepository().list(
+        "tenant-1", "user-1", space_id="space-1", allowed_space_ids=["space-1"]
+    )
 
     sql, _ = db.calls[0]
     assert "order by pinned_at desc nulls last, updated_at desc, session_id desc" in sql
@@ -286,6 +290,7 @@ async def test_archived_query_joins_space_counts_and_maps_rows(monkeypatch) -> N
         space_id=None,
         limit=50,
         offset=0,
+        allowed_space_ids=["space-1"],
     )
 
     assert total == 1
@@ -322,6 +327,7 @@ async def test_archived_query_filters_by_original_space(monkeypatch) -> None:
         space_id="space-1",
         limit=20,
         offset=20,
+        allowed_space_ids=["space-1"],
     )
 
     for sql, params in db.calls:

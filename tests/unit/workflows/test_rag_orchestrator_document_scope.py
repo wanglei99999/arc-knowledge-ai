@@ -27,7 +27,7 @@ async def test_retrieve_threads_scope_and_drops_out_of_scope_hits(monkeypatch) -
             return _Pipeline()
 
     class _ChunkRepo:
-        async def get_chunks_by_ids(self, chunk_ids, tenant_id):
+        async def get_chunks_by_ids(self, chunk_ids, tenant_id, space_id):
             captured["chunk_ids"] = chunk_ids
             return [
                 {

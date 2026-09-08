@@ -5,8 +5,10 @@ import uuid
 
 from sqlalchemy import text
 
+from app.domain.authorization import UserContext
 from app.domain.document import DocumentChunk, DocumentStatus
 from app.infrastructure.postgres.client import get_session
+from app.infrastructure.postgres.repositories.authorization_repo import write_audit
 
 
 def _row_to_dict(row) -> dict:
@@ -30,15 +32,16 @@ class ChunkRepository:
         original_name: str,
         mime_type: str,
         file_path: str,
+        created_by_membership_id: str,
         file_size: int | None = None,
     ) -> None:
         """在 documents 表写入初始记录（status=pending），触发 Workflow 前调用。"""
         sql = text("""
             INSERT INTO documents
-                (id, tenant_id, space_id, original_name, mime_type, file_path, file_size, status)
+                (id, tenant_id, space_id, original_name, mime_type, file_path, file_size, status, created_by_membership_id)
             VALUES
                 (:id, :tenant_id, :space_id, :original_name, :mime_type, :file_path,
-                 :file_size, 'pending')
+                 :file_size, 'pending', :created_by_membership_id)
             ON CONFLICT (id) DO NOTHING
         """)
         async with get_session() as session:
@@ -52,6 +55,7 @@ class ChunkRepository:
                     "mime_type": mime_type,
                     "file_path": file_path,
                     "file_size": file_size,
+                    "created_by_membership_id": created_by_membership_id,
                 },
             )
 
@@ -122,9 +126,16 @@ class ChunkRepository:
         tenant_id: str,
         status: DocumentStatus,
         error_message: str | None = None,
+        *,
+        actor: UserContext | None = None,
     ) -> None:
         deleted_at_clause = ", deleted_at = NOW()" if status == DocumentStatus.DELETED else ""
         error_clause = ", error_message = :error_message" if error_message is not None else ""
+        actor_clause = (
+            ", deleted_by = :deleted_by"
+            if actor and status in (DocumentStatus.DELETING, DocumentStatus.DELETED)
+            else ""
+        )
 
         sql = text(f"""
             UPDATE documents
@@ -132,6 +143,7 @@ class ChunkRepository:
                 updated_at = NOW()
                 {deleted_at_clause}
                 {error_clause}
+                {actor_clause}
             WHERE id = :document_id
             AND tenant_id = :tenant_id
         """)
@@ -144,14 +156,29 @@ class ChunkRepository:
 
         if error_message is not None:
             params["error_message"] = error_message
+        if actor_clause:
+            params["deleted_by"] = actor.user_id
 
         async with get_session() as session:
-            await session.execute(sql, params)
+            result = await session.execute(sql, params)
+            if actor_clause and result.rowcount:
+                await write_audit(
+                    session,
+                    actor,
+                    (
+                        "document.delete"
+                        if status == DocumentStatus.DELETED
+                        else "document.delete.requested"
+                    ),
+                    "document",
+                    document_id,
+                )
 
     async def get_chunks_by_ids(
         self,
         chunk_ids: list[str],
         tenant_id: str,
+        space_id: str,
     ) -> list[dict]:
         """按 chunk_id 列表批量查询，保留顺序（ORDER BY chunk_index）。"""
         if not chunk_ids:
@@ -160,9 +187,11 @@ class ChunkRepository:
             SELECT dc.chunk_id, dc.content, dc.document_id, dc.chunk_index,
                    dc.token_count, dc.metadata, d.original_name
             FROM document_chunks dc
-            LEFT JOIN documents d ON dc.document_id = d.id
+            JOIN documents d ON dc.document_id = d.id AND dc.tenant_id = d.tenant_id
             WHERE dc.chunk_id  = ANY(:chunk_ids)
               AND dc.tenant_id = :tenant_id
+              AND d.space_id = :space_id AND d.deleted_at IS NULL
+              AND d.status NOT IN ('deleting', 'deleted')
             ORDER BY dc.chunk_index
         """)
         async with get_session() as session:
@@ -171,6 +200,7 @@ class ChunkRepository:
                 {
                     "chunk_ids": chunk_ids,
                     "tenant_id": tenant_id,
+                    "space_id": space_id,
                 },
             )
             return [_row_to_dict(row) for row in result]
@@ -264,7 +294,7 @@ class ChunkRepository:
 
         sql = text(f"""
             SELECT id, tenant_id, space_id, original_name, mime_type,
-                   status, chunk_count, error_message, created_at, updated_at
+                   status, chunk_count, error_message, created_at, updated_at, created_by_membership_id
             FROM documents
             {where}
             ORDER BY created_at DESC

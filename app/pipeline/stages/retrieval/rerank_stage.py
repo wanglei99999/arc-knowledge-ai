@@ -71,6 +71,7 @@ class RerankStage(BaseStage[SearchContext, list[SearchHit]]):
             chunks = await chunk_repo.get_chunks_by_ids(
                 [h.chunk_id for h in hits],
                 ctx.tenant_id,
+                search_ctx.query.space_id,
             )
             content_map: dict[str, str] = {c["chunk_id"]: c["content"] for c in chunks}
 

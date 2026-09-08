@@ -10,6 +10,7 @@ from app.domain.metadata_filter import MetadataFilter
 from app.memory.assembler import ContextAssembler
 from app.memory.extractor import MemoryExtractor
 from app.memory.manager import MemoryManager
+from app.services.authorization_service import authorization
 from app.workflows.rag_orchestrator import RAGOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -74,12 +75,20 @@ class ChatService:
         self._extractor = extractor or _extractor
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[str | list]:
+        await self.authorize_request(req)
         if req.session_id and req.user_id:
             async for item in self._stream_with_memory(req):
                 yield item
         else:
             async for item in self._stream_simple(req):
                 yield item
+
+    async def authorize_request(self, req):
+        await authorization.authorize_user(req.tenant_id, req.user_id, req.space_id, "space.read")
+        if req.session_id:
+            await authorization.authorize_session(
+                req.tenant_id, req.user_id, req.session_id, space_id=req.space_id
+            )
 
     @staticmethod
     def _build_citations(rag_result) -> list[dict]:
@@ -117,6 +126,7 @@ class ChatService:
             self._manager.load_semantic_memories(
                 tenant_id=req.tenant_id,
                 user_id=req.user_id,
+                space_id=req.space_id,
                 query=req.query,
                 embedding_provider_name=req.embedding_provider_name,
             ),
@@ -170,6 +180,7 @@ class ChatService:
 
     async def stream_attachment_answer(self, req) -> AsyncIterator[str | list]:
         """回答已持久化的用户 Turn，只使用本轮附件作为事实来源。"""
+        await self.authorize_request(req)
         working_memory, rag_result = await asyncio.gather(
             self._manager.load_working_memory(req.session_id, req.tenant_id, req.user_id),
             self._orchestrator.retrieve(

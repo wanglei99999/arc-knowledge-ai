@@ -1,77 +1,38 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app.config.settings import settings
-from app.infrastructure.elasticsearch.client import reset_index
-from app.infrastructure.milvus.client import reset_collection
-from app.infrastructure.milvus.memory_collection import reset_memory_collection
-from app.infrastructure.minio.client import empty_bucket
+from app.api.dependencies import UserContext, require_tenant_admin
 from app.infrastructure.postgres.client import get_session
 from app.services.model_config_service import ModelConfigService
 from app.services.tenant_config_service import TenantConfigService
 from app.services.usage_service import UsageService
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_tenant_admin)])
+
+
+async def scoped_admin(tenant_id: str, user: UserContext = Depends(require_tenant_admin)):
+    if tenant_id != user.tenant_id:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return user
+
 
 _tenant_config_svc = TenantConfigService()
 _model_config_svc = ModelConfigService()
 _usage_svc = UsageService()
 
-_PG_TABLES = (
-    "message_citations",
-    "memories",
-    "messages",
-    "sessions",
-    "document_chunks",
-    "documents",
-    "spaces",
-)
-
 
 @router.post("/dev/reset", summary="[DEV ONLY] 清空所有存储数据")
 async def dev_reset() -> dict:
-    """
-    一键清空所有存储（PostgreSQL / Milvus / Elasticsearch / MinIO）。
-
-    仅在 app_env=development 时可用，生产环境返回 403。
-    """
-    if settings.app_env != "development":
-        raise HTTPException(status_code=403, detail="Only available in development environment")
-
-    async def _reset_pg() -> int:
-        async with get_session() as session:
-            total = 0
-            for table in _PG_TABLES:
-                result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
-                total += result.scalar_one()
-            await session.execute(
-                text(f"TRUNCATE {', '.join(_PG_TABLES)} RESTART IDENTITY CASCADE")
-            )
-            return total
-
-    pg_count, (milvus_chunks, milvus_memories), es_count, minio_count = await asyncio.gather(
-        _reset_pg(),
-        asyncio.gather(reset_collection(), reset_memory_collection()),
-        reset_index(),
-        empty_bucket(),
+    """全局破坏性操作不属于租户管理员权限，保留拒绝响应兼容旧客户端。"""
+    raise HTTPException(
+        status_code=403,
+        detail="Global reset is disabled in the multi-tenant API; use an operator-controlled offline procedure",
     )
-
-    return {
-        "status": "ok",
-        "cleared": {
-            "postgres_rows": pg_count,
-            "milvus_chunk_vectors": milvus_chunks,
-            "milvus_memory_vectors": milvus_memories,
-            "elasticsearch_docs": es_count,
-            "minio_objects": minio_count,
-        },
-    }
 
 
 # ── 租户 LLM 配置管理 ─────────────────────────────────────────────────────────
@@ -84,7 +45,7 @@ class TenantConfigBody(BaseModel):
 
 
 @router.get("/tenants/{tenant_id}/config", summary="查询租户 LLM 配置")
-async def get_tenant_config(tenant_id: str) -> dict:
+async def get_tenant_config(tenant_id: str, user: UserContext = Depends(scoped_admin)) -> dict:
     """
     查询指定租户的 LLM 配置。DB 中无记录时返回系统默认值。
     """
@@ -98,7 +59,9 @@ async def get_tenant_config(tenant_id: str) -> dict:
 
 
 @router.put("/tenants/{tenant_id}/config", summary="新建或更新租户 LLM 配置")
-async def update_tenant_config(tenant_id: str, body: TenantConfigBody) -> dict:
+async def update_tenant_config(
+    tenant_id: str, body: TenantConfigBody, user: UserContext = Depends(scoped_admin)
+) -> dict:
     """
     新建或更新租户 LLM 配置（upsert）。
 
@@ -131,20 +94,12 @@ async def list_model_configs() -> list[dict]:
 
 @router.post("/models/{model_id}", summary="新增或更新模型单价配置")
 async def upsert_model_config(model_id: str, body: ModelConfigBody) -> dict:
-    return await _model_config_svc.upsert(
-        model_id=model_id,
-        input_cost_per_1k=body.input_cost_per_1k,
-        output_cost_per_1k=body.output_cost_per_1k,
-        context_window=body.context_window,
-    )
+    raise HTTPException(403, detail="Global model pricing is operator-managed")
 
 
 @router.delete("/models/{model_id}", summary="删除模型单价配置")
 async def delete_model_config(model_id: str) -> dict:
-    deleted = await _model_config_svc.delete(model_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Model {model_id!r} not found")
-    return {"status": "ok", "model_id": model_id}
+    raise HTTPException(403, detail="Global model pricing is operator-managed")
 
 
 # ── 用量查询 ──────────────────────────────────────────────────────────────────
@@ -156,6 +111,7 @@ async def get_tenant_usage(
     start: date = Query(default=None),
     end: date = Query(default=None),
     group_by: str | None = Query(default=None),
+    user: UserContext = Depends(scoped_admin),
 ) -> dict:
     today = date.today()
     start = start or today.replace(day=1)  # 默认本月第一天
@@ -167,16 +123,23 @@ async def get_tenant_usage(
 
 
 @router.get("/stats", summary="系统聚合统计")
-async def get_stats() -> dict:
+async def get_stats(user: UserContext = Depends(require_tenant_admin)) -> dict:
     async with get_session() as session:
         doc_row = await session.execute(
             text(
                 "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size), 0) AS storage "
-                "FROM documents WHERE deleted_at IS NULL"
-            )
+                "FROM documents WHERE deleted_at IS NULL AND tenant_id=:tenant_id"
+            ),
+            {"tenant_id": user.tenant_id},
         )
-        chunk_row = await session.execute(text("SELECT COUNT(*) FROM document_chunks"))
-        session_row = await session.execute(text("SELECT COUNT(*) FROM sessions"))
+        chunk_row = await session.execute(
+            text("SELECT COUNT(*) FROM document_chunks WHERE tenant_id=:tenant_id"),
+            {"tenant_id": user.tenant_id},
+        )
+        session_row = await session.execute(
+            text("SELECT COUNT(*) FROM sessions WHERE tenant_id=:tenant_id"),
+            {"tenant_id": user.tenant_id},
+        )
     doc = doc_row.mappings().one()
     return {
         "document_count": int(doc["cnt"]),

@@ -7,12 +7,15 @@ from temporalio.client import Client
 from temporalio.contrib.opentelemetry import TracingInterceptor
 
 from app.config.settings import settings
+from app.domain.authorization import UserContext
 from app.domain.document import DocumentStatus
 from app.infrastructure.elasticsearch.client import delete_by_document as es_delete_by_document
 from app.infrastructure.milvus.client import delete_by_document as milvus_delete_by_document
 from app.infrastructure.minio.client import delete_file as minio_delete_file
+from app.infrastructure.minio.client import download_file
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.redis.semantic_cache import cache as _cache
+from app.services.authorization_service import authorization
 from app.workflows.ingestion_activities import IngestionInput
 from app.workflows.ingestion_workflow import IngestionWorkflow
 
@@ -24,6 +27,7 @@ class IngestRequest:
     file_path: str  # MinIO object key
     mime_type: str
     original_filename: str
+    user_id: str = ""
     document_id: str | None = None  # API 层上传 MinIO 后传入，None 时自动生成
     # 租户配置（由控制面传入，或从 Nacos 查询）
     ingestion_strategy: str = "standard"
@@ -62,6 +66,9 @@ class DocumentService:
         return await Client.connect(settings.temporal_host, interceptors=interceptors)
 
     async def ingest(self, req: IngestRequest) -> IngestResult:
+        await authorization.authorize_user(
+            req.tenant_id, req.user_id, req.space_id, "document.upload"
+        )
         document_id = req.document_id or str(uuid.uuid4())
         task_id = str(uuid.uuid4())
 
@@ -108,8 +115,11 @@ class DocumentService:
         self,
         document_id: str,
         tenant_id: str,
+        *,
+        user_id: str = "",
     ) -> IngestResult:
         """清理失败 run 的残留索引，并复用 MinIO 原文件启动新的 Workflow。"""
+        await authorization.authorize_document(tenant_id, user_id, document_id, "document.retry")
         repo = ChunkRepository()
         meta = await repo.get_document_meta(document_id, tenant_id)
         if meta is None:
@@ -160,8 +170,16 @@ class DocumentService:
             workflow_run_id=handle.run_id,
         )
 
-    async def get_status(self, document_id: str, tenant_id: str) -> dict:
+    async def get_content(self, document_id: str, tenant_id: str, *, user_id: str = ""):
+        await authorization.authorize_document(tenant_id, user_id, document_id)
+        meta = await ChunkRepository().get_document_meta(document_id, tenant_id)
+        if meta is None:
+            raise ValueError("Document not found")
+        return await download_file(meta["file_path"]), meta
+
+    async def get_status(self, document_id: str, tenant_id: str, *, user_id: str = "") -> dict:
         """查询 Workflow 执行状态（先校验文档归属该租户，防跨租户 IDOR）"""
+        await authorization.authorize_document(tenant_id, user_id, document_id)
         repo = ChunkRepository()
         meta = await repo.get_document_meta(document_id, tenant_id)
         if meta is None:
@@ -180,18 +198,29 @@ class DocumentService:
         space_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        *,
+        user_id: str = "",
     ) -> dict:
+        decision = await authorization.authorize_user(tenant_id, user_id, space_id, "space.read")
         repo = ChunkRepository()
         documents = await repo.list_documents(tenant_id, space_id, limit, offset)
+        for document in documents:
+            document["capabilities"] = authorization.document_capabilities(
+                decision, str(document.get("created_by_membership_id") or "")
+            )
         total = await repo.count_documents(tenant_id, space_id)
         return {"items": documents, "total": total}
 
-    async def delete(self, document_id: str, tenant_id: str) -> DeleteResult:
+    async def delete(self, document_id: str, tenant_id: str, *, user_id: str = "") -> DeleteResult:
         """
         删除文档：
         - documents 表逻辑删除（status=DELETED）
         - MinIO / Milvus / ES / PG chunks 物理删除
         """
+        decision = await authorization.authorize_document(
+            tenant_id, user_id, document_id, "document.delete"
+        )
+        actor = UserContext(tenant_id, user_id, decision["membership_id"])
         repo = ChunkRepository()
 
         meta = await repo.get_document_meta(document_id, tenant_id)
@@ -202,7 +231,9 @@ class DocumentService:
             raise ValueError(f"Document {document_id} is already being deleted or deleted")
 
         # 标记为删除中，防止并发重复删除
-        await repo.update_document_status(document_id, tenant_id, DocumentStatus.DELETING)
+        await repo.update_document_status(
+            document_id, tenant_id, DocumentStatus.DELETING, actor=actor
+        )
 
         # 依次物理删除各存储层（任一失败均向上抛出，由调用方决定是否重试）
         await minio_delete_file(meta["file_path"])
@@ -211,9 +242,11 @@ class DocumentService:
         await repo.delete_chunks_by_document(document_id, tenant_id)
 
         # 最后将 documents 记录逻辑删除
-        await repo.update_document_status(document_id, tenant_id, DocumentStatus.DELETED)
+        await repo.update_document_status(
+            document_id, tenant_id, DocumentStatus.DELETED, actor=actor
+        )
 
         # chunk_ids 已物理删除，清除该租户的语义缓存（避免 citations 引用断裂）
-        await _cache.invalidate(tenant_id)
+        await _cache.invalidate(tenant_id, str(meta["space_id"]))
 
         return DeleteResult(document_id=document_id)

@@ -278,27 +278,29 @@ class SemanticCache:
         except Exception as e:
             logger.warning("Semantic cache set error: %s", e)
 
-    async def invalidate(self, tenant_id: str) -> None:
-        """删除文档或重新上传时，清除该租户的全部语义缓存。"""
-        _indexed_tenants.discard(tenant_id)
+    async def invalidate(self, tenant_id: str, space_id: str) -> None:
+        """清除指定空间的精确/向量答案缓存及索引，不触及其他空间。"""
+        _indexed_tenants.discard(f"{tenant_id}:{space_id}")
         redis = get_redis_binary()
 
         # 删除向量索引（同时移除 Redis Stack 中的索引条目）
         try:
-            await redis.execute_command("FT.DROPINDEX", f"idx:cache:{tenant_id}")
+            await redis.execute_command("FT.DROPINDEX", f"idx:cache:{tenant_id}:{space_id}")
         except Exception:
             pass
 
-        # 删除精确匹配 key
-        cursor = 0
-        while True:
-            cursor, keys = await redis.scan(cursor, match=f"cache:exact:{tenant_id}:*", count=100)
-            if keys:
-                await redis.delete(*keys)
-            if cursor == 0:
-                break
+        for kind in ("exact", "vec"):
+            cursor = 0
+            while True:
+                cursor, keys = await redis.scan(
+                    cursor, match=f"cache:{kind}:{tenant_id}:{space_id}:*", count=100
+                )
+                if keys:
+                    await redis.delete(*keys)
+                if cursor == 0:
+                    break
 
-        logger.info("Invalidated semantic cache for tenant %s", tenant_id)
+        logger.info("Invalidated semantic cache for tenant=%s space=%s", tenant_id, space_id)
 
 
 # 全局单例，由 rag_orchestrator 和 document_service 共享

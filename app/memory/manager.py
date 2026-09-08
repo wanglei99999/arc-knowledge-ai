@@ -90,6 +90,7 @@ class MemoryManager:
         user_id: str,
         query: str,
         embedding_provider_name: str,
+        space_id: str,
     ) -> list[Memory]:
         """搜索与当前 query 最相关的语义记忆（Layer 3）"""
         embed: EmbeddingProvider = registry.get_provider(embedding_provider_name)
@@ -101,6 +102,7 @@ class MemoryManager:
             query_embedding=query_embedding,
             tenant_id=tenant_id,
             user_id=user_id,
+            space_id=space_id,
             top_k=settings.memory_top_k,
             score_threshold=settings.memory_similarity_threshold,
         )
@@ -108,7 +110,7 @@ class MemoryManager:
             return []
 
         memory_ids = [h["memory_id"] for h in hits]
-        return await self._memory_repo.get_by_ids(memory_ids, tenant_id, user_id)
+        return await self._memory_repo.get_by_ids(memory_ids, tenant_id, user_id, space_id)
 
     async def save_user_message(
         self,

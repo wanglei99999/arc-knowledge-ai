@@ -144,7 +144,8 @@ class _CitationRepository:
         self.values = values
         self.calls: list[tuple[list[str], str]] = []
 
-    async def get_by_message_ids(self, message_ids, tenant_id):
+    async def get_by_message_ids(self, message_ids, tenant_id, space_id):
+        assert space_id == "space-1"
         self.calls.append((message_ids, tenant_id))
         return self.values
 
@@ -164,7 +165,14 @@ class _MemoryRepository:
 
 
 @pytest.mark.asyncio
-async def test_session_service_batch_hydrates_messages_without_n_plus_one() -> None:
+async def test_session_service_batch_hydrates_messages_without_n_plus_one(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.services.authorization_service import authorization
+
+    monkeypatch.setattr(
+        authorization, "authorize_session", AsyncMock(return_value={"space_id": "space-1"})
+    )
     messages = [
         Message(
             message_id="turn-1",

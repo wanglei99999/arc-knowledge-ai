@@ -340,7 +340,7 @@ async def run_l1(
     warnings: list[str] = []
     primary_failure: SmokeFailure | None = None
     stage = "auth-register"
-    headers = {"X-Tenant-Id": config.tenant_id}
+    headers: dict[str, str] = {}
 
     timeout = httpx.Timeout(config.timeout_seconds)
     async with httpx.AsyncClient(
@@ -353,7 +353,11 @@ async def run_l1(
             register = await client.post(
                 "/auth/register",
                 headers=headers,
-                json={"email": config.email, "password": config.password},
+                json={
+                    "email": config.email,
+                    "password": config.password,
+                    "tenant_name": "R0 smoke organization",
+                },
             )
             _require_status(register, stage, {201, 409})
             checks.append(_check(stage, "PASS", f"HTTP {register.status_code}", started))
@@ -366,7 +370,25 @@ async def run_l1(
                 json={"email": config.email, "password": config.password},
             )
             _require_status(login, stage)
-            headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+            login_data = login.json()
+            if "selection_token" in login_data:
+                target = next(
+                    (m for m in login_data["memberships"] if m["tenant_id"] == config.tenant_id),
+                    None,
+                )
+                if target is None:
+                    raise SmokeFailure(
+                        "Multiple memberships: configure SMOKE_TENANT_ID to an active tenant ID",
+                        stage=stage,
+                    )
+                selected = await client.post(
+                    "/auth/switch-tenant",
+                    headers={"Authorization": "Bearer " + login_data["selection_token"]},
+                    json={"tenant_id": target["tenant_id"]},
+                )
+                _require_status(selected, stage)
+                login_data = selected.json()
+            headers["Authorization"] = f"Bearer {login_data['access_token']}"
             client.headers.update(headers)
             checks.append(_check(stage, "PASS", "authenticated", started))
 

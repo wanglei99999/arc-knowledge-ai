@@ -742,11 +742,13 @@ class ChatTurnRepository:
                 FROM message_citations
                 WHERE message_id = :assistant_message_id
                   AND tenant_id = :tenant_id
+                  AND space_id = :space_id
                 ORDER BY rank
             """),
                 {
                     "assistant_message_id": assistant_id,
                     "tenant_id": tenant_id,
+                    "space_id": turn_row._mapping["space_id"],
                 },
             )
             citations = [_row_to_citation(row) for row in citation_result.fetchall()]

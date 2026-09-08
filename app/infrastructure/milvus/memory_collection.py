@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from pymilvus import DataType, MilvusClient
 
 from app.config.settings import settings
 
-MEMORY_COLLECTION = "arc_memories"
+MEMORY_COLLECTION = "arc_memories_v4"
 
 _F_MEMORY_ID = "memory_id"
 _F_USER_ID = "user_id"
 _F_TENANT_ID = "tenant_id"
+_F_SPACE_ID = "space_id"
 _F_EMBEDDING = "embedding"
 
 
@@ -30,6 +32,7 @@ def _ensure_collection(c: MilvusClient) -> None:
     schema.add_field(_F_MEMORY_ID, DataType.VARCHAR, max_length=64, is_primary=True)
     schema.add_field(_F_USER_ID, DataType.VARCHAR, max_length=64)
     schema.add_field(_F_TENANT_ID, DataType.VARCHAR, max_length=64, is_partition_key=True)
+    schema.add_field(_F_SPACE_ID, DataType.VARCHAR, max_length=64)
     schema.add_field(_F_EMBEDDING, DataType.FLOAT_VECTOR, dim=_memory_dim())
 
     idx = MilvusClient.prepare_index_params()
@@ -63,7 +66,7 @@ async def reset_memory_collection() -> int:
 
 
 async def upsert_memory_vector(
-    memory_id: str, user_id: str, tenant_id: str, embedding: list[float]
+    memory_id: str, user_id: str, tenant_id: str, embedding: list[float], space_id: str
 ) -> None:
     def _do() -> None:
         c = _client()
@@ -75,6 +78,7 @@ async def upsert_memory_vector(
                     _F_MEMORY_ID: memory_id,
                     _F_USER_ID: user_id,
                     _F_TENANT_ID: tenant_id,
+                    _F_SPACE_ID: space_id,
                     _F_EMBEDDING: embedding,
                 }
             ],
@@ -100,6 +104,7 @@ async def search_memory_vectors(
     query_embedding: list[float],
     tenant_id: str,
     user_id: str,
+    space_id: str,
     top_k: int = 5,
     score_threshold: float = 0.6,
 ) -> list[dict]:
@@ -110,7 +115,7 @@ async def search_memory_vectors(
         results = c.search(
             collection_name=MEMORY_COLLECTION,
             data=[query_embedding],
-            filter=f'{_F_TENANT_ID} == "{tenant_id}" and {_F_USER_ID} == "{user_id}"',
+            filter=f"{_F_TENANT_ID} == {json.dumps(tenant_id)} and {_F_USER_ID} == {json.dumps(user_id)} and {_F_SPACE_ID} == {json.dumps(space_id)}",
             limit=top_k,
             output_fields=[_F_MEMORY_ID, _F_USER_ID],
             search_params={"metric_type": "COSINE", "params": {"ef": 100}},

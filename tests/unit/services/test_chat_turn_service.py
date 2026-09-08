@@ -20,6 +20,8 @@ from app.services.chat_turn_service import (
 )
 from app.services.document_service import IngestResult
 
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
+
 
 def _attachment(**overrides) -> AttachmentView:
     values = {
@@ -153,7 +155,8 @@ class _DocumentService:
         self.ingested.append(req)
         return IngestResult(req.document_id, "task-1", "run-1")
 
-    async def retry_ingestion(self, document_id, tenant_id):
+    async def retry_ingestion(self, document_id, tenant_id, *, user_id):
+        assert user_id == "user-1"
         self.retried.append((document_id, tenant_id))
         return IngestResult(document_id, "task-2", "run-2")
 

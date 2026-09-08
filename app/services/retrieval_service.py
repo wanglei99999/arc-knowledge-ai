@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from app.domain.metadata_filter import MetadataFilter
 from app.domain.retrieval import RetrievalResult
+from app.services.authorization_service import authorization
 from app.workflows.rag_orchestrator import RAGOrchestrator
 
 _orchestrator = RAGOrchestrator()
@@ -14,6 +15,7 @@ class SearchRequest:
     query: str
     tenant_id: str
     space_id: str = "default"
+    user_id: str = ""
     top_k: int = 10
     score_threshold: float = 0.5
     metadata_filters: list[MetadataFilter] = field(default_factory=list)
@@ -31,6 +33,7 @@ class RetrievalService:
     """封装检索逻辑，对 API 层屏蔽 Pipeline 细节。"""
 
     async def search(self, req: SearchRequest) -> SearchResponse:
+        await authorization.authorize_user(req.tenant_id, req.user_id, req.space_id, "space.read")
         result: RetrievalResult = await _orchestrator.retrieve(
             query_text=req.query,
             tenant_id=req.tenant_id,

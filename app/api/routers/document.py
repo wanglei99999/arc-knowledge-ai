@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app.api.dependencies import require_tenant
+from app.api.dependencies import UserContext, require_user
+from app.config.settings import settings
 from app.infrastructure.minio.client import build_object_key, upload_file
 from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
+from app.services.authorization_service import authorization
 from app.services.document_service import DeleteResult, DocumentService, IngestRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -53,12 +57,15 @@ async def upload_document(
     file: UploadFile,
     space_id: str,
     metadata: str | None = None,
-    tenant_id: str = Depends(require_tenant),
+    user: UserContext = Depends(require_user),
 ) -> UploadResponse:
     """
     接收文件上传，写入 MinIO（Phase 1 实现），触发 Temporal Workflow。
     立即返回 document_id，前端通过 GET /documents/{id}/status 轮询进度。
     """
+    tenant_id = user.tenant_id
+    await authorization.authorize_user(tenant_id, user.user_id, space_id, "document.upload")
+    parsed_metadata = _parse_metadata(metadata)
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -71,7 +78,9 @@ async def upload_document(
     import uuid
 
     document_id = str(uuid.uuid4())
-    data = await file.read()
+    data = await file.read(settings.document_max_file_size_bytes + 1)
+    if len(data) > settings.document_max_file_size_bytes:
+        raise HTTPException(413, detail="File exceeds upload size limit")
     object_key = build_object_key(tenant_id, space_id, document_id, file.filename)
     await upload_file(data, object_key, content_type=mime_type)
 
@@ -85,18 +94,20 @@ async def upload_document(
         mime_type=mime_type,
         file_path=object_key,
         file_size=len(data),
+        created_by_membership_id=user.membership_id,
     )
 
     # 我们在这里的设计上是，matadata 存在于 chunk 中，而不是落在 document 中，
     # 所以创建 document 的时候是不带 matadata 的
     req = IngestRequest(
         tenant_id=tenant_id,
+        user_id=user.user_id,
         space_id=space_id,
         file_path=object_key,
         mime_type=mime_type,
         original_filename=file.filename,
         document_id=document_id,
-        metadata=_parse_metadata(metadata),
+        metadata=parsed_metadata,
     )
 
     result = await _service.ingest(req)
@@ -114,10 +125,10 @@ async def upload_document(
 )
 async def get_document_status(
     document_id: str,
-    tenant_id: str = Depends(require_tenant),
+    user: UserContext = Depends(require_user),
 ) -> StatusResponse:
     try:
-        data = await _service.get_status(document_id, tenant_id)
+        data = await _service.get_status(document_id, user.tenant_id, user_id=user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     return StatusResponse(**data)
@@ -128,12 +139,14 @@ async def get_document_status(
     summary="查询文档列表",
 )
 async def list_documents(
-    space_id: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-    tenant_id: str = Depends(require_tenant),
+    space_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: UserContext = Depends(require_user),
 ) -> dict:
-    return await _service.list_documents(tenant_id, space_id, limit, offset)
+    return await _service.list_documents(
+        user.tenant_id, space_id, limit, offset, user_id=user.user_id
+    )
 
 
 @router.get(
@@ -142,12 +155,13 @@ async def list_documents(
 )
 async def list_chunks(
     document_id: str,
-    tenant_id: str = Depends(require_tenant),
+    user: UserContext = Depends(require_user),
 ) -> dict:
     from app.infrastructure.postgres.repositories.chunk_repo import ChunkRepository
 
+    await authorization.authorize_document(user.tenant_id, user.user_id, document_id)
     repo = ChunkRepository()
-    chunks = await repo.get_chunks_by_document(document_id, tenant_id)
+    chunks = await repo.get_chunks_by_document(document_id, user.tenant_id)
     return {"items": chunks, "total": len(chunks)}
 
 
@@ -159,7 +173,7 @@ async def list_chunks(
 )
 async def delete_document(
     document_id: str,
-    tenant_id: str = Depends(require_tenant),
+    user: UserContext = Depends(require_user),
 ) -> DeleteResult:
     """
     删除指定文档：
@@ -167,7 +181,7 @@ async def delete_document(
     - MinIO 原始文件、Milvus 向量、ES 索引、PG chunks 全部物理删除
     """
     try:
-        return await _service.delete(document_id, tenant_id)
+        return await _service.delete(document_id, user.tenant_id, user_id=user.user_id)
     except ValueError as e:
         raise HTTPException(
             status_code=(
@@ -175,3 +189,26 @@ async def delete_document(
             ),
             detail=str(e),
         ) from e
+
+
+@router.post("/{document_id}/retry", status_code=202)
+async def retry_document(document_id: str, user: UserContext = Depends(require_user)):
+    try:
+        return await _service.retry_ingestion(document_id, user.tenant_id, user_id=user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/{document_id}/download")
+async def download_document(document_id: str, user: UserContext = Depends(require_user)):
+    data, meta = await _service.get_content(document_id, user.tenant_id, user_id=user.user_id)
+    return Response(
+        data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''"
+            + quote(meta["original_name"], safe=""),
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

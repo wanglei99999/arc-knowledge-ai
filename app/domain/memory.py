@@ -67,6 +67,7 @@ class Memory:
     user_id: str
     category: MemoryCategory
     content: str  # 提取的事实 / 偏好 / 目标文本
+    space_id: str = ""
     source_session_id: str | None = None
     confidence: float = 1.0  # [0, 1]
     embedding: list[float] | None = None

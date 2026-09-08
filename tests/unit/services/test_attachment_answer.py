@@ -23,6 +23,7 @@ from app.services.chat_service import ChatService
 from app.services.chat_turn_service import ChatTurnConflictError, ChatTurnService
 
 DOC1 = "11111111-1111-4111-8111-111111111111"
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
 
 
 def _attachment() -> AttachmentView:

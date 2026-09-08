@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.domain.metadata_filter import FilterOperator, MetadataFilter
 from app.domain.retrieval import RetrievalResult
 from app.services import retrieval_service
 from app.services.retrieval_service import RetrievalService, SearchRequest
+
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
 
 
 async def test_search_threads_metadata_filters(monkeypatch) -> None:

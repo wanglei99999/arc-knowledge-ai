@@ -8,6 +8,8 @@ from app.domain.memory import ArchivedSession, Session
 from app.domain.space import Space
 from app.services.session_service import SessionService
 
+pytestmark = pytest.mark.usefixtures("authorized_resource_actor")
+
 
 class _SessionRepository:
     def __init__(self) -> None:
@@ -246,6 +248,7 @@ async def test_list_archived_returns_page_from_owned_repository_query() -> None:
         ("tenant-1", "user-1"),
         {
             "query": "上传",
+            "allowed_space_ids": ["space-1"],
             "space_id": "space-1",
             "limit": 50,
             "offset": 0,
